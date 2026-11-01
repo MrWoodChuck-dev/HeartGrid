@@ -1,0 +1,705 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Heart Grid - A game by Woodchuck.">
+
+    <title>Heart Grid</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<main class="boot-screen">
+
+    <!-- ONYRO SPLASH -->
+    <section id="onyro-splash" class="screen active">
+        <img src="assets/onyro-logo.png" alt="ONYRO" class="onyro-logo">
+    </section>
+
+    <!-- TITLE SCREEN -->
+    <section id="game-title" class="screen">
+        <img src="assets/heart-grid-logo.png" alt="Heart Grid" class="game-logo">
+        <p class="press-prompt">PRESS ANY KEY TO CONTINUE</p>
+        <span class="version">A GAME BY WOODCHUCK</span>
+    </section>
+
+    <!-- GAME -->
+    <section id="game-content" class="screen">
+
+        <!-- ROLE SELECTION -->
+        <section id="role-screen" class="panel-screen active">
+            <div class="role-container">
+                <h1>HEART GRID</h1>
+                <p>Select your role to continue.</p>
+
+                <div class="role-buttons">
+                    <button id="host-role-button" class="role-button">HOST</button>
+                    <button id="player-role-button" class="role-button">PLAYER</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- HOST SCREEN -->
+        <section id="host-screen" class="panel-screen">
+            <div class="interface-container">
+
+                <div class="interface-header">
+                    <div>
+                        <p class="interface-label">GAME MANAGEMENT</p>
+                        <h1>HOST PANEL</h1>
+                    </div>
+                    <button class="back-button">BACK</button>
+                </div>
+
+                <!-- HOST ROOM -->
+                <div class="host-section">
+                    <h2>HOST ROOM</h2>
+
+                    <button id="create-room-button" class="primary-button">
+                        CREATE ROOM
+                    </button>
+
+                    <div id="host-room-info" hidden>
+                        <p>Share this Room ID with your players:</p>
+                        <h2 id="host-room-id" class="room-code">------</h2>
+                        <p id="host-player-count">Players: 0 / 5</p>
+                    </div>
+
+                    <p id="host-room-message" class="status-message"></p>
+                </div>
+
+                <!-- PLAYER LOBBY -->
+                <div class="host-section">
+                    <h2>PLAYER LOBBY</h2>
+                    <div id="host-player-list">
+                        <p class="empty-message">Create a room to see players.</p>
+                    </div>
+                </div>
+
+                <!-- CARD ASSIGNMENT -->
+                <div class="host-section">
+                    <h2>ISSUE CARD ASSIGNMENT</h2>
+
+                    <p class="section-description">
+                        Decide when a player receives a new card assignment
+                        and how many positions their card can target.
+                    </p>
+
+                    <label for="assignment-player">PLAYER</label>
+                    <select id="assignment-player" disabled>
+                        <option value="">Waiting for players</option>
+                    </select>
+
+                    <label for="host-target-count">TARGET POSITIONS</label>
+                    <select id="host-target-count">
+                        <option value="" selected disabled>Select target count</option>
+                        <option value="2">2 Positions</option>
+                        <option value="3">3 Positions</option>
+                        <option value="4">4 Positions</option>
+                        <option value="5">5 Positions</option>
+                        <option value="6">6 Positions</option>
+                        <option value="7">7 Positions</option>
+                    </select>
+
+                    <p class="host-limit-note">
+                        Minimum: 2 positions. Maximum: 7 positions.
+                    </p>
+
+                    <button id="issue-assignment-button" class="primary-button" disabled>
+                        ISSUE ASSIGNMENT
+                    </button>
+
+                    <p id="host-message" class="status-message"></p>
+                </div>
+
+                <!-- MONSTER ENCOUNTER -->
+                <div class="host-section" id="monster-encounter-section">
+                    <h2>MONSTER ENCOUNTER</h2>
+
+                    <p class="section-description">
+                        Create an encounter and configure the monster's battlefield.
+                    </p>
+
+                    <label for="monster-name">MONSTER NAME</label>
+                    <input
+                        type="text"
+                        id="monster-name"
+                        placeholder="Enter monster name"
+                        maxlength="24"
+                        autocomplete="off"
+                    >
+
+                    <label for="monster-grid-size">MONSTER GRID SIZE</label>
+                    <select id="monster-grid-size">
+                        <option value="3">3×3</option>
+                        <option value="5">5×5</option>
+                        <option value="7">7×7</option>
+                    </select>
+
+                    <button id="create-encounter-button" class="primary-button">
+                        CREATE ENCOUNTER
+                    </button>
+
+                    <div id="monster-encounter-info" hidden>
+                        <div class="encounter-heading">
+                            <h3 id="active-monster-name">Monster</h3>
+                            <p id="monster-encounter-status">Encounter created.</p>
+                        </div>
+
+                        <div class="host-monster-grid-container">
+                            <h3>MONSTER GRID</h3>
+                            <div id="host-monster-grid" class="heart-grid"></div>
+                        </div>
+
+                        <button id="start-encounter-button" class="primary-button">
+                            START ENCOUNTER
+                        </button>
+
+                        <button id="end-encounter-button" class="primary-button" disabled>
+                            END ENCOUNTER
+                        </button>
+                    </div>
+
+                    <p id="monster-encounter-message" class="status-message"></p>
+                </div>
+
+                <!-- HOST COMBAT ORDER -->
+                <div class="host-section turn-system" id="host-turn-system">
+                    <div class="turn-system-header">
+                        <div>
+                            <p class="interface-label">BATTLE MANAGEMENT</p>
+                            <h2>COMBAT ORDER</h2>
+                        </div>
+                        <span class="turn-round-label">INITIATIVE</span>
+                    </div>
+
+                    <p id="host-turn-current" class="turn-current">
+                        Waiting for encounter...
+                    </p>
+
+                    <div id="host-initiative-list" class="initiative-list">
+                        <p class="empty-message">Initiative will appear when combat starts.</p>
+                    </div>
+
+                    <button id="end-monster-turn" class="primary-button" hidden>
+                        END MONSTER TURN
+                    </button>
+                </div>
+
+                <!-- MONSTER ATTACK -->
+                <div class="host-section" id="monster-attack-section">
+                    <h2>MONSTER ATTACK</h2>
+
+                    <p class="section-description">
+                        Roll a D10 to determine how many positions the monster can target.
+                    </p>
+
+                    <div class="dice-display">
+                        <span class="dice-label">D10 RESULT</span>
+                        <strong id="monster-d10-result">?</strong>
+                    </div>
+
+                    <button id="roll-monster-d10-button" class="primary-button" disabled>
+                        ROLL D10
+                    </button>
+
+                    <label for="monster-target-player">SELECT TARGET PLAYER</label>
+                    <select id="monster-target-player" disabled>
+                        <option value="">Select a player</option>
+                    </select>
+
+                    <p id="monster-target-count">Positions remaining: 0</p>
+
+                    <p class="section-description">
+                        Select the target positions on the player's grid.
+                    </p>
+
+                    <div id="host-target-grid" class="heart-grid"></div>
+
+                    <button id="confirm-monster-attack-button" class="primary-button" disabled>
+                        CONFIRM MONSTER ATTACK
+                    </button>
+
+                    <p id="monster-attack-message" class="status-message"></p>
+                </div>
+
+                <!-- PARTY STATUS -->
+                <div class="host-section">
+                    <h2>PARTY STATUS</h2>
+                    <p class="section-description">
+                        Monitor every player's Heart Grid during combat.
+                    </p>
+
+                    <div id="host-party-grids">
+                        <p class="empty-message">Waiting for players.</p>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- PLAYER SCREEN -->
+        <section id="player-screen" class="panel-screen">
+            <div class="interface-container">
+
+                <div class="interface-header">
+                    <div>
+                        <p class="interface-label">PLAYER INTERFACE</p>
+                        <h1>PLAYER PANEL</h1>
+                    </div>
+                    <button class="back-button">BACK</button>
+                </div>
+
+                <!-- REGISTRATION -->
+                <div id="player-registration" class="player-section">
+                    <h2>JOIN A ROOM</h2>
+
+                    <label for="join-room-input">ROOM ID</label>
+                    <input
+                        type="text"
+                        id="join-room-input"
+                        placeholder="Enter Room ID"
+                        maxlength="6"
+                        autocomplete="off"
+                    >
+
+                    <label for="player-username">USERNAME</label>
+                    <input
+                        type="text"
+                        id="player-username"
+                        placeholder="Enter username"
+                        maxlength="16"
+                        autocomplete="off"
+                    >
+
+                    <label for="player-class">SELECT CLASS</label>
+                    <select id="player-class">
+                        <option value="" selected disabled>Choose a class</option>
+                        <option value="Tank">Tank</option>
+                        <option value="Warrior">Warrior</option>
+                        <option value="Mage">Mage</option>
+                        <option value="Support">Support</option>
+                        <option value="Thief">Thief</option>
+                    </select>
+
+                    <button id="join-room-button" class="primary-button">
+                        JOIN ROOM
+                    </button>
+
+                    <p id="player-room-message" class="status-message"></p>
+                </div>
+
+                <!-- PLAYER LOBBY -->
+                <div id="player-lobby-info" class="player-section" hidden>
+                    <h2>CONNECTED TO ROOM</h2>
+                    <p id="player-identity"></p>
+                    <p id="player-room-status">Waiting for Host...</p>
+                </div>
+
+                <!-- PLAYER GAME AREA -->
+                <div id="player-game-area" hidden>
+
+                    <div class="player-navigation">
+                        <button class="player-tab active" data-tab="preparation">
+                            PREPARATION
+                        </button>
+                        <button class="player-tab" data-tab="combat">
+                            COMBAT
+                        </button>
+                    </div>
+
+                    <!-- PREPARATION -->
+                    <div id="preparation-tab" class="player-tab-content active">
+
+                        <div class="player-section">
+                            <h2>CARD ASSIGNMENT</h2>
+                            <p id="player-assignment-status">
+                                Waiting for a Host assignment.
+                            </p>
+                        </div>
+
+                        <div class="player-section">
+                            <h2>CARD CREATOR</h2>
+
+                            <div class="card-settings">
+                                <label for="card-name">CARD NAME</label>
+                                <input
+                                    type="text"
+                                    id="card-name"
+                                    placeholder="Enter card name"
+                                    maxlength="24"
+                                    autocomplete="off"
+                                >
+
+                                <div id="card-type-container" hidden>
+                                    <label for="card-type">CARD TYPE</label>
+                                    <select id="card-type">
+                                        <option value="attack">Attack</option>
+                                        <option value="heal">Heal</option>
+                                    </select>
+
+                                    <p id="card-type-description" class="card-type-description">
+                                        Attack cards target the monster.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <p id="card-selection-count">Waiting for assignment.</p>
+                            <div id="card-grid" class="card-grid"></div>
+
+                            <button id="save-card-button" class="primary-button" disabled>
+                                SAVE CARD
+                            </button>
+
+                            <p id="card-message" class="status-message"></p>
+                        </div>
+
+                        <div class="player-section">
+                            <div class="section-heading">
+                                <h2>MY CARDS</h2>
+                                <span id="card-inventory-count">0 / 4 CARDS</span>
+                            </div>
+
+                            <p class="section-description">
+                                You can carry a maximum of four cards.
+                                Discard a card to make room for another.
+                            </p>
+
+                            <div id="saved-cards">
+                                <p class="empty-message">No cards created yet.</p>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- COMBAT -->
+                    <div id="combat-tab" class="player-tab-content">
+
+                        <!-- COMBAT STATUS -->
+                        <div class="player-section">
+                            <h2>COMBAT STATUS</h2>
+                            <p id="combat-status">Waiting for an encounter...</p>
+                        </div>
+
+                        <!-- PLAYER COMBAT ORDER -->
+                        <div class="player-section turn-system" id="player-turn-system">
+
+                            <div class="turn-system-header">
+                                <div>
+                                    <p class="interface-label">BATTLE STATUS</p>
+                                    <h2>COMBAT ORDER</h2>
+                                </div>
+                                <span class="turn-round-label">INITIATIVE</span>
+                            </div>
+
+                            <p id="player-turn-current" class="turn-current">
+                                Waiting for encounter...
+                            </p>
+
+                            <div id="player-initiative-list" class="initiative-list">
+                                <p class="empty-message">
+                                    Initiative will appear when combat starts.
+                                </p>
+                            </div>
+
+                            <!-- ENERGY -->
+                            <div id="energy-display" class="energy-display" hidden>
+                                <div class="energy-heading">
+                                    <span>YOUR ENERGY</span>
+                                    <strong id="energy-value">0 / 9</strong>
+                                </div>
+
+                                <div class="energy-track">
+                                    <div id="energy-bar" class="energy-fill"></div>
+                                </div>
+
+                                <p class="energy-description">
+                                    Card cost equals the number of target positions.
+                                </p>
+                            </div>
+
+                            <button id="end-player-turn" class="primary-button" hidden>
+                                END TURN
+                            </button>
+
+                        </div>
+
+                        <!-- COMBAT ARENA -->
+                        <div class="combat-arena">
+
+                            <section class="combat-monster-panel">
+                                <h2>MONSTER</h2>
+                                <h3 id="combat-monster-name">No monster</h3>
+                                <p id="combat-monster-status">No active encounter.</p>
+
+                                <div id="monster-grid" class="heart-grid monster-grid"></div>
+                            </section>
+
+                            <section class="combat-party-panel">
+                                <h2>YOUR PARTY</h2>
+
+                                <div class="party-member">
+                                    <h3>MY HEART GRID</h3>
+
+                                    <p class="section-description">
+                                        Green represents HP. Dark represents empty
+                                        positions. Blue represents Overheal.
+                                    </p>
+
+                                    <div id="heart-grid" class="heart-grid"></div>
+
+                                    <div class="grid-legend">
+                                        <span>
+                                            <i class="legend-color hp-color"></i>
+                                            HP
+                                        </span>
+                                        <span>
+                                            <i class="legend-color empty-color"></i>
+                                            EMPTY
+                                        </span>
+                                        <span>
+                                            <i class="legend-color overheal-color"></i>
+                                            OVERHEAL
+                                        </span>
+                                        <span>
+                                            <i class="legend-color target-color"></i>
+                                            TARGET
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div class="party-roster-section">
+                                    <h3>PARTY HEART GRIDS</h3>
+                                    <p class="section-description">
+                                        View and target your teammates' grids.
+                                    </p>
+
+                                    <div id="party-grids">
+                                        <p class="empty-message">
+                                            Waiting for party members.
+                                        </p>
+                                    </div>
+                                </div>
+                            </section>
+
+                        </div>
+
+                        <!-- COMBAT CARDS -->
+                        <div class="player-section">
+                            <h2>COMBAT CARDS</h2>
+
+                            <p class="section-description">
+                                Select a card to enter targeting mode. Attack cards
+                                target the monster. Heal cards target yourself or
+                                a teammate. Hover to preview the pattern, then click
+                                to confirm.
+                            </p>
+
+                            <div id="heal-target-container" hidden>
+                                <label for="heal-target-player">HEAL TARGET</label>
+                                <select id="heal-target-player"></select>
+                            </div>
+
+                            <div id="combat-cards">
+                                <p class="empty-message">
+                                    Your saved cards will appear here.
+                                </p>
+                            </div>
+
+                            <p id="combat-card-message" class="status-message"></p>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </section>
+</main>
+
+<!-- LOAD SOCKET.IO AND THE MAIN GAME SCRIPT -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="script.js"></script>
+
+<!-- ENERGY AND INITIATIVE INTERFACE -->
+<script>
+    let displayedEnergy = 0;
+
+    const initiativeElements = {
+        host: {
+            current: document.getElementById("host-turn-current"),
+            list: document.getElementById("host-initiative-list")
+        },
+        player: {
+            current: document.getElementById("player-turn-current"),
+            list: document.getElementById("player-initiative-list")
+        }
+    };
+
+    const energyDisplay = document.getElementById("energy-display");
+    const energyValue = document.getElementById("energy-value");
+    const energyBar = document.getElementById("energy-bar");
+
+    const endPlayerTurnButton =
+        document.getElementById("end-player-turn");
+
+    const endMonsterTurnButton =
+        document.getElementById("end-monster-turn");
+
+    function renderInitiativeList(element, order, currentTurn) {
+        if (!element) return;
+
+        element.innerHTML = "";
+
+        if (!order || order.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "empty-message";
+            empty.textContent = "Initiative will appear when combat starts.";
+            element.appendChild(empty);
+            return;
+        }
+
+        order.forEach(participant => {
+            const item = document.createElement("div");
+            item.className = "initiative-player";
+
+            if (currentTurn?.id === participant.id) {
+                item.classList.add("active-turn");
+            }
+
+            const number = document.createElement("strong");
+            number.className = "initiative-number";
+            number.textContent = participant.initiative;
+
+            const details = document.createElement("div");
+            details.className = "initiative-details";
+
+            const name = document.createElement("strong");
+            name.textContent = participant.username;
+
+            const role = document.createElement("span");
+            role.textContent = participant.type === "monster"
+                ? "MONSTER"
+                : participant.className;
+
+            details.append(name, role);
+            item.append(number, details);
+
+            element.appendChild(item);
+        });
+    }
+
+    function renderTurnInterface(encounter) {
+        const active = Boolean(encounter?.active);
+        const order = encounter?.initiativeOrder || [];
+        const turn = encounter?.currentTurn || null;
+
+        renderInitiativeList(
+            initiativeElements.host.list,
+            order,
+            turn
+        );
+
+        renderInitiativeList(
+            initiativeElements.player.list,
+            order,
+            turn
+        );
+
+        const currentText = active && turn
+            ? `CURRENT TURN: ${turn.username}`
+            : active
+                ? "Waiting for a turn..."
+                : "Waiting for encounter...";
+
+        initiativeElements.host.current.textContent = currentText;
+        initiativeElements.player.current.textContent = currentText;
+
+        const isMyTurn =
+            currentRole === "player" &&
+            turn?.type === "player" &&
+            turn.id === currentPlayerID;
+
+        const isMonsterTurn =
+            currentRole === "host" &&
+            turn?.type === "monster";
+
+        endPlayerTurnButton.hidden = !active || !isMyTurn;
+        endMonsterTurnButton.hidden = !active || !isMonsterTurn;
+
+        endPlayerTurnButton.disabled = !isMyTurn;
+        endMonsterTurnButton.disabled = !isMonsterTurn;
+
+        energyDisplay.hidden = !active || currentRole !== "player";
+
+        energyValue.textContent = `${displayedEnergy} / 9`;
+
+        energyBar.style.width =
+            `${Math.max(0, Math.min(100, displayedEnergy / 9 * 100))}%`;
+
+        if (!active) {
+            displayedEnergy = 0;
+            energyValue.textContent = "0 / 9";
+            energyBar.style.width = "0%";
+        }
+    }
+
+    /* RECEIVE ENERGY FROM SERVER */
+    socket.on("player-state", state => {
+        if (currentRole !== "player") return;
+
+        displayedEnergy = state.energy ?? 0;
+
+        renderTurnInterface(currentEncounter);
+    });
+
+    /* RECEIVE INITIATIVE FROM SERVER */
+    socket.on("encounter-state", encounter => {
+        renderTurnInterface(encounter);
+    });
+
+    /* KEEP ENERGY SYNCHRONIZED WITH PARTY STATE */
+    socket.on("party-update", players => {
+        if (currentRole !== "player") return;
+
+        const ownPlayer = (players || []).find(
+            player => player.id === currentPlayerID
+        );
+
+        if (ownPlayer) {
+            displayedEnergy = ownPlayer.energy ?? 0;
+        }
+
+        renderTurnInterface(currentEncounter);
+    });
+
+    /* PLAYER ENDS TURN */
+    endPlayerTurnButton.addEventListener("click", () => {
+        if (currentRole !== "player") return;
+
+        endPlayerTurnButton.disabled = true;
+        socket.emit("end-player-turn");
+    });
+
+    /* HOST ENDS MONSTER TURN */
+    endMonsterTurnButton.addEventListener("click", () => {
+        if (currentRole !== "host") return;
+
+        endMonsterTurnButton.disabled = true;
+        socket.emit("end-monster-turn");
+    });
+
+    /* RESET WHEN ROOM CLOSES */
+    socket.on("room-closed", () => {
+        displayedEnergy = 0;
+        renderTurnInterface(null);
+    });
+</script>
+
+</body>
+</html>
