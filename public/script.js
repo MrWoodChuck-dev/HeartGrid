@@ -6,6 +6,134 @@ const socket = io();
 
 
 /* =====================================
+   CLASS / CARD CONFIGURATION
+===================================== */
+
+const CARD_TYPES_BY_CLASS = {
+    Tank: ["attack", "taunt"],
+    Warrior: ["attack", "rage"],
+    Mage: ["attack", "heal"],
+    Support: ["heal", "buff"],
+    Thief: ["attack"]
+};
+
+// Card types that use the 3x3 pattern editor.
+const PATTERN_TYPES = ["attack", "heal", "rage"];
+
+const RAGE_ENERGY_PER_POSITION = 2;
+
+const CARD_TYPE_LABELS = {
+    attack: "ATTACK CARD",
+    heal: "HEAL CARD",
+    buff: "BUFF CARD",
+    rage: "RAGE CARD",
+    taunt: "TAUNT CARD"
+};
+
+const CARD_TYPE_OPTION_NAMES = {
+    attack: "Attack",
+    heal: "Heal",
+    buff: "Buff",
+    rage: "Rage",
+    taunt: "Taunt"
+};
+
+const CARD_TYPE_DESCRIPTIONS = {
+    attack:
+        "Attack cards target the monster and deal damage. Costs Energy equal to its positions.",
+    heal:
+        "Heal cards target yourself or a teammate. Empty cells become HP, and HP becomes Overheal. Costs Energy equal to its positions.",
+    buff:
+        "Buff cards give Energy to a teammate. A 4 position card costs you 4 Energy and gives them 4 Energy. No pattern needed.",
+    rage:
+        "Rage cards sacrifice HP / Overheal from your own grid. Every position taken gives you 2 Energy. Using Rage costs no Energy.",
+    taunt:
+        "Taunt cards force the monster to hit you. Each position soaks one hit, and Taunt stacks. Costs Energy equal to its positions. No pattern needed."
+};
+
+function getCardTypes() {
+    return CARD_TYPES_BY_CLASS[currentPlayerClass] || [];
+}
+
+function cardUsesPattern(type) {
+    return PATTERN_TYPES.includes(type);
+}
+
+
+/* =====================================
+   EXTRA STYLES FOR NEW CARD TYPES
+===================================== */
+
+(function injectStyles() {
+    const style = document.createElement("style");
+
+    style.textContent = `
+        .combat-card-type.buff { color: #8a5a00; opacity: 1; }
+        .combat-card-type.rage { color: #b02a2a; opacity: 1; }
+        .combat-card-type.taunt { color: #5a3d99; opacity: 1; }
+
+        .combat-card-button.rage-card.selected {
+            border-color: var(--red);
+            background: rgba(217, 72, 72, 0.08);
+        }
+        .combat-card-button.buff-card.selected {
+            border-color: #d49a1a;
+            background: rgba(212, 154, 26, 0.1);
+        }
+        .combat-card-button.taunt-card.selected {
+            border-color: #7a5bc4;
+            background: rgba(122, 91, 196, 0.1);
+        }
+
+        #heart-grid.rage-targeting .grid-cell.target-preview {
+            outline-color: var(--red);
+            background: var(--red-light);
+            box-shadow: 0 0 10px rgba(217, 72, 72, 0.55);
+        }
+
+        .card-count-badge {
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+            width: 65px;
+            height: 65px;
+            border: 1px solid #888;
+            border-radius: 8px;
+            font-size: 26px;
+            font-weight: bold;
+        }
+
+        .taunt-banner {
+            margin: 0 0 15px;
+            padding: 10px 12px;
+            border-left: 3px solid #7a5bc4;
+            background: rgba(122, 91, 196, 0.1);
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .thief-status-panel {
+            margin-bottom: 18px;
+            padding: 14px;
+            border: 1px solid #888;
+            border-radius: 8px;
+        }
+        .thief-status-panel p {
+            margin: 0 0 12px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        #buff-confirm-button {
+            margin-top: 12px;
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
+
+
+/* =====================================
    GAME SCREENS
 ===================================== */
 
@@ -111,6 +239,7 @@ let currentPlayerClass = null;
 let roomPlayers = [];
 let activeAssignment = null;
 let savedCards = [];
+let myStatus = null;
 
 let playerGridSize = 3;
 let playerGridCells = Array(9).fill("hp");
@@ -119,6 +248,16 @@ let currentEncounter = null;
 let monsterAttackRoll = null;
 
 let selectedTargetPositions = new Set();
+
+function isMyTurn() {
+    const turn = currentEncounter?.currentTurn;
+
+    return Boolean(
+        currentEncounter?.active &&
+        turn?.type === "player" &&
+        turn.id === currentPlayerID
+    );
+}
 
 
 /* =====================================
@@ -197,9 +336,13 @@ function renderHostLobby() {
         const identity = document.createElement("strong");
         identity.textContent = player.username;
 
+        const cardText = player.className === "Thief" && player.status
+            ? `${player.cardCount}/4 Cards · Poison ${player.status.remainingTurns}`
+            : `${player.cardCount}/4 Cards`;
+
         const details = document.createElement("span");
         details.textContent =
-            `${player.className} · ${player.cardCount}/4 Cards · ` +
+            `${player.className} · ${cardText} · ` +
             `${player.hasAssignment ? "Assignment pending" : "No assignment"}`;
 
         item.append(identity, details);
@@ -218,7 +361,8 @@ function updateAssignmentPlayerOptions() {
     assignmentPlayer.innerHTML = "";
 
     const eligiblePlayers = roomPlayers.filter(player =>
-        !player.hasAssignment && player.cardCount < 4
+        !player.hasAssignment &&
+        (player.className === "Thief" || player.cardCount < 4)
     );
 
     if (eligiblePlayers.length === 0) {
@@ -476,6 +620,8 @@ socket.on("room-joined", data => {
         "Waiting for a Host assignment.";
 
     updateCardTypeVisibility();
+    refreshThiefPanel();
+    renderCombatCards();
 });
 
 
@@ -494,6 +640,7 @@ socket.on("player-state", state => {
 
     activeAssignment = state.assignment;
     savedCards = state.cards || [];
+    myStatus = state.status || null;
 
     playerGridSize = state.gridSize;
     playerGridCells = state.grid || [];
@@ -509,6 +656,8 @@ socket.on("player-state", state => {
     renderSavedCards();
     renderCombatCards();
     updatePlayerAssignment();
+    refreshThiefPanel();
+    refreshCombatStatusLine();
 });
 
 
@@ -525,15 +674,26 @@ socket.on("assignment-received", assignment => {
     cardNameInput.value = "";
     cardMessage.textContent = "";
 
-    cardTypeSelect.value = "attack";
+    const types = getCardTypes();
+
+    if (types.length > 0) {
+        cardTypeSelect.value = types[0];
+    }
+
     updateCardTypeDescription();
 
     updatePlayerAssignment();
     updateCardGrid();
+    refreshThiefPanel();
 });
 
 
 function updatePlayerAssignment() {
+    const thiefHint = currentPlayerClass === "Thief" && activeAssignment
+        ? ` Make an Attack card here, or spend it on Status in the Combat tab ` +
+          `(${activeAssignment.targetCount} turns of poison for ${activeAssignment.targetCount} Energy).`
+        : "";
+
     if (!activeAssignment) {
         playerAssignmentStatus.textContent =
             "Waiting for a Host assignment.";
@@ -547,14 +707,16 @@ function updatePlayerAssignment() {
 
     if (savedCards.length >= 4) {
         playerAssignmentStatus.textContent =
-            "Your inventory is full. Discard a card before creating another.";
+            "Your inventory is full. Discard a card before creating another." +
+            thiefHint;
 
         updateCardGrid();
         return;
     }
 
     playerAssignmentStatus.textContent =
-        `HOST ASSIGNED YOU ${activeAssignment.targetCount} TARGET POSITIONS.`;
+        `HOST ASSIGNED YOU ${activeAssignment.targetCount} TARGET POSITIONS.` +
+        thiefHint;
 
     updateCardGrid();
 }
@@ -578,6 +740,8 @@ const cardTypeDescription = document.getElementById("card-type-description");
 const savedCardsContainer = document.getElementById("saved-cards");
 const cardInventoryCount = document.getElementById("card-inventory-count");
 
+const cardCreatorSection = cardNameInput?.closest(".player-section");
+
 let selectedPositions = new Set();
 
 
@@ -586,32 +750,64 @@ function canCreateHealCards() {
 }
 
 
+function getSelectedCardType() {
+    const types = getCardTypes();
+
+    if (types.length === 0) return null;
+
+    return types.includes(cardTypeSelect.value)
+        ? cardTypeSelect.value
+        : types[0];
+}
+
+
 function updateCardTypeVisibility() {
-    const canHeal = canCreateHealCards();
+    const types = getCardTypes();
 
-    cardTypeContainer.hidden = !canHeal;
+    cardTypeSelect.innerHTML = "";
 
-    if (!canHeal) {
-        cardTypeSelect.value = "attack";
+    types.forEach(type => {
+        const option = document.createElement("option");
+
+        option.value = type;
+        option.textContent = CARD_TYPE_OPTION_NAMES[type];
+
+        cardTypeSelect.appendChild(option);
+    });
+
+    if (types.length > 0) {
+        cardTypeSelect.value = types[0];
+    }
+
+    // Only classes with a real choice need the selector.
+    cardTypeContainer.hidden = types.length < 2;
+
+    // Thieves have no cards at all.
+    if (cardCreatorSection) {
+        cardCreatorSection.hidden = types.length === 0;
     }
 
     updateCardTypeDescription();
+    updatePlayerAssignment();
+    updateCardGrid();
     checkCardValidity();
 }
 
 
 function updateCardTypeDescription() {
-    if (cardTypeSelect.value === "heal") {
-        cardTypeDescription.textContent =
-            "Heal cards target yourself or a teammate. Empty cells become HP, and HP becomes Overheal.";
-    } else {
-        cardTypeDescription.textContent =
-            "Attack cards target the monster and deal damage.";
-    }
+    const type = getSelectedCardType();
+
+    cardTypeDescription.textContent =
+        type ? CARD_TYPE_DESCRIPTIONS[type] : "";
 }
 
 
-cardTypeSelect?.addEventListener("change", updateCardTypeDescription);
+cardTypeSelect?.addEventListener("change", () => {
+    selectedPositions.clear();
+
+    updateCardTypeDescription();
+    updateCardGrid();
+});
 
 
 function createCardGrid() {
@@ -645,6 +841,11 @@ function createCardGrid() {
 
 
 function updateCardGrid() {
+    const usesPattern = cardUsesPattern(getSelectedCardType());
+
+    // Buff and Taunt cards only use the number of positions.
+    cardGrid.hidden = !usesPattern;
+
     Array.from(cardGrid.children).forEach((cell, index) => {
         const selected = selectedPositions.has(index);
 
@@ -665,9 +866,17 @@ function updateCardGrid() {
 
 
 function updateCardCounter() {
+    const type = getSelectedCardType();
+
     if (!activeAssignment) {
         cardSelectionCount.textContent =
             "Waiting for assignment.";
+    } else if (!cardUsesPattern(type)) {
+        const count = activeAssignment.targetCount;
+
+        cardSelectionCount.textContent = type === "buff"
+            ? `Assigned: ${count} positions. This card gives ${count} Energy and costs ${count} Energy.`
+            : `Assigned: ${count} positions. This card soaks ${count} hits and costs ${count} Energy.`;
     } else {
         cardSelectionCount.textContent =
             `Selected: ${selectedPositions.size} / ${activeAssignment.targetCount}`;
@@ -678,22 +887,22 @@ function updateCardCounter() {
 
 
 function checkCardValidity() {
+    const type = getSelectedCardType();
     const hasName = cardNameInput.value.trim().length > 0;
 
     const hasCorrectTargets =
         activeAssignment &&
-        selectedPositions.size === activeAssignment.targetCount;
-
-    const validType =
-        cardTypeSelect.value === "attack" ||
-        (cardTypeSelect.value === "heal" && canCreateHealCards());
+        (
+            !cardUsesPattern(type) ||
+            selectedPositions.size === activeAssignment.targetCount
+        );
 
     saveCardButton.disabled =
         !activeAssignment ||
         savedCards.length >= 4 ||
         !hasName ||
         !hasCorrectTargets ||
-        !validType;
+        !type;
 }
 
 
@@ -707,19 +916,20 @@ cardNameInput?.addEventListener("input", checkCardValidity);
 saveCardButton?.addEventListener("click", () => {
     if (!activeAssignment || savedCards.length >= 4) return;
 
+    const type = getSelectedCardType();
+
+    if (!type) return;
+
     const name = cardNameInput.value.trim();
 
-    const pattern = Array.from(selectedPositions)
-        .sort((a, b) => a - b);
-
-    const type = canCreateHealCards()
-        ? cardTypeSelect.value
-        : "attack";
+    const pattern = cardUsesPattern(type)
+        ? Array.from(selectedPositions).sort((a, b) => a - b)
+        : [];
 
     if (
         !name ||
-        pattern.length !== activeAssignment.targetCount ||
-        (type === "heal" && !canCreateHealCards())
+        (cardUsesPattern(type) &&
+            pattern.length !== activeAssignment.targetCount)
     ) {
         return;
     }
@@ -744,7 +954,12 @@ socket.on("card-saved", card => {
     selectedPositions.clear();
 
     cardNameInput.value = "";
-    cardTypeSelect.value = "attack";
+
+    const types = getCardTypes();
+
+    if (types.length > 0) {
+        cardTypeSelect.value = types[0];
+    }
 
     cardMessage.textContent = "CARD CREATED SUCCESSFULLY!";
 
@@ -795,6 +1010,26 @@ socket.on("card-discard-error", message => {
 
 
 /* =====================================
+   CARD TEXT HELPERS
+===================================== */
+
+function describeCardEffect(card) {
+    const n = card.targetCount;
+
+    switch (card.type) {
+        case "buff":
+            return `Give ${n} Energy · costs ${n}`;
+        case "taunt":
+            return `Soak ${n} hits · costs ${n}`;
+        case "rage":
+            return `Take ${n} HP · gain ${n * RAGE_ENERGY_PER_POSITION} Energy`;
+        default:
+            return `${n} Target Positions · costs ${n}`;
+    }
+}
+
+
+/* =====================================
    RENDER SAVED CARDS
 ===================================== */
 
@@ -823,8 +1058,8 @@ function renderSavedCards() {
 
         const description = document.createElement("p");
         description.textContent =
-            `${card.targetCount} Target Positions · ` +
-            `${card.type === "heal" ? "HEAL CARD" : "ATTACK CARD"}`;
+            `${describeCardEffect(card)} · ` +
+            `${CARD_TYPE_LABELS[card.type] || "CARD"}`;
 
         info.append(title, description);
 
@@ -856,6 +1091,16 @@ function renderSavedCards() {
 
 
 function createCardPreview(card) {
+    // Buff and Taunt have no pattern, so show the position count instead.
+    if (!cardUsesPattern(card.type)) {
+        const badge = document.createElement("div");
+
+        badge.className = "card-count-badge";
+        badge.textContent = card.targetCount;
+
+        return badge;
+    }
+
     const preview = document.createElement("div");
     preview.className = "card-preview-grid";
 
@@ -880,6 +1125,8 @@ function createCardPreview(card) {
 
 function previewCardPattern(card) {
     clearCardPreview();
+
+    if (!cardUsesPattern(card.type)) return;
 
     card.pattern.forEach(position => {
         const cardRow = Math.floor(position / 3);
@@ -929,6 +1176,8 @@ const hostPartyGrids = document.getElementById("host-party-grids");
 
 const healTargetContainer = document.getElementById("heal-target-container");
 const healTargetPlayerSelect = document.getElementById("heal-target-player");
+const healTargetLabel =
+    healTargetContainer?.querySelector("label");
 
 let selectedCombatCard = null;
 
@@ -938,6 +1187,162 @@ let hoveredHealAnchor = null;
 let selectedHealTargetID = null;
 
 let combatAttackPending = false;
+
+
+/* =====================================
+   BUFF CONFIRM BUTTON
+===================================== */
+
+const buffConfirmButton = document.createElement("button");
+
+buffConfirmButton.type = "button";
+buffConfirmButton.id = "buff-confirm-button";
+buffConfirmButton.className = "primary-button";
+buffConfirmButton.textContent = "GIVE ENERGY";
+buffConfirmButton.hidden = true;
+
+healTargetContainer?.appendChild(buffConfirmButton);
+
+buffConfirmButton.addEventListener("click", () => {
+    if (
+        !selectedCombatCard ||
+        selectedCombatCard.type !== "buff" ||
+        combatAttackPending ||
+        !selectedHealTargetID
+    ) {
+        return;
+    }
+
+    const target = roomPlayers.find(
+        player => player.id === selectedHealTargetID
+    );
+
+    combatAttackPending = true;
+
+    socket.emit("player-buff", {
+        cardID: selectedCombatCard.id,
+        targetPlayerID: selectedHealTargetID
+    });
+
+    combatCardMessage.textContent =
+        `Giving Energy to ${target?.username || "teammate"}...`;
+
+    renderCombatCards();
+});
+
+
+/* =====================================
+   THIEF STATUS PANEL
+===================================== */
+
+const thiefStatusPanel = document.createElement("div");
+
+thiefStatusPanel.className = "thief-status-panel";
+thiefStatusPanel.hidden = true;
+
+const thiefStatusText = document.createElement("p");
+
+const thiefStatusButton = document.createElement("button");
+
+thiefStatusButton.type = "button";
+thiefStatusButton.className = "primary-button";
+thiefStatusButton.textContent = "ACTIVATE STATUS";
+
+thiefStatusPanel.append(thiefStatusText, thiefStatusButton);
+
+combatCardsContainer?.parentElement?.insertBefore(
+    thiefStatusPanel,
+    combatCardsContainer
+);
+
+thiefStatusButton.addEventListener("click", () => {
+    thiefStatusButton.disabled = true;
+    combatCardMessage.textContent = "Activating Status...";
+
+    socket.emit("activate-thief-status");
+});
+
+
+function refreshThiefPanel() {
+    const isThief = currentRole === "player" && currentPlayerClass === "Thief";
+
+    thiefStatusPanel.hidden = !isThief;
+
+    if (!isThief) return;
+
+    if (myStatus?.type === "thief") {
+        thiefStatusText.textContent =
+            `Poison is active: ${myStatus.remainingTurns} turn(s) left. ` +
+            `At the end of each of your turns it deals 1–2 damage to a random healthy position.`;
+
+        thiefStatusButton.disabled = true;
+        return;
+    }
+
+    if (!activeAssignment) {
+        thiefStatusText.textContent =
+            "Status: positions = turns of poison = Energy cost. Needs a Host assignment (the same assignment can instead become an Attack card).";
+
+        thiefStatusButton.disabled = true;
+        return;
+    }
+
+    const n = activeAssignment.targetCount;
+
+    thiefStatusText.textContent =
+        `Assignment: ${n} positions. Activating Status uses it up: ${n} turns, ${n} Energy. ` +
+        `Each turn it deals 1–2 damage to a random healthy position on a random player.`;
+
+    thiefStatusButton.disabled = !isMyTurn();
+}
+
+
+socket.on("thief-status-activated", result => {
+    combatCardMessage.textContent = result.message;
+    thiefStatusButton.disabled = false;
+});
+
+
+socket.on("thief-status-resolved", result => {
+    const message = result.targetUsername
+        ? `${result.thiefUsername}'s poison hit ${result.targetUsername} for ` +
+          `${result.damage + result.overhealDamage} position(s).` +
+          (result.expired ? " The poison has worn off." : ` ${result.remainingTurns} turn(s) left.`)
+        : `${result.thiefUsername}'s poison found no target.`;
+
+    if (currentRole === "player") {
+        combatCardMessage.textContent = message;
+    } else if (currentRole === "host") {
+        monsterEncounterMessage.textContent = message;
+    }
+});
+
+
+/* =====================================
+   COMBAT STATUS LINE
+===================================== */
+
+function refreshCombatStatusLine() {
+    const status = document.getElementById("combat-status");
+
+    if (!status || !currentEncounter) return;
+
+    let text = currentEncounter.active
+        ? "COMBAT IN PROGRESS"
+        : "Encounter waiting to start.";
+
+    if (currentEncounter.active && currentEncounter.taunt) {
+        text +=
+            ` · TAUNT: the monster must hit ${currentEncounter.taunt.tankUsername} ` +
+            `(${currentEncounter.taunt.remainingDamage} hit(s) left)`;
+    }
+
+    if (currentPlayerClass === "Thief" && myStatus?.type === "thief") {
+        text += ` · POISON: ${myStatus.remainingTurns} turn(s) left`;
+    }
+
+    status.textContent = text;
+}
 
 
 /* =====================================
@@ -984,46 +1389,55 @@ function getCardTargetPositions(card, anchor, gridSize) {
 
 
 /* =====================================
-   HEAL TARGET SELECTION
+   TARGET PLAYER SELECTION (HEAL / BUFF)
 ===================================== */
 
 function updateHealTargetOptions() {
     if (!healTargetPlayerSelect) return;
 
+    const isBuff = selectedCombatCard?.type === "buff";
+
     const previousValue = selectedHealTargetID;
 
     healTargetPlayerSelect.innerHTML = "";
 
-    roomPlayers.forEach(player => {
+    // Buff can only go to teammates; Heal can include yourself.
+    const candidates = isBuff
+        ? roomPlayers.filter(player => player.id !== currentPlayerID)
+        : roomPlayers;
+
+    candidates.forEach(player => {
         const option = document.createElement("option");
 
         option.value = player.id;
 
+        const energyText = isBuff ? ` · ${player.energy ?? 0} Energy` : "";
+
         option.textContent =
             player.id === currentPlayerID
                 ? `${player.username} (YOU)`
-                : `${player.username} (${player.className})`;
+                : `${player.username} (${player.className})${energyText}`;
 
         healTargetPlayerSelect.appendChild(option);
     });
 
-    const previousTargetExists = roomPlayers.some(
-        player => player.id === previousValue
-    );
-
-    if (previousTargetExists) {
+    if (candidates.some(player => player.id === previousValue)) {
         selectedHealTargetID = previousValue;
+    } else if (isBuff) {
+        selectedHealTargetID = candidates[0]?.id || null;
     } else {
         selectedHealTargetID = currentPlayerID;
     }
 
-    if (
-        !roomPlayers.some(player => player.id === selectedHealTargetID)
-    ) {
-        selectedHealTargetID = roomPlayers[0]?.id || null;
+    if (!candidates.some(player => player.id === selectedHealTargetID)) {
+        selectedHealTargetID = candidates[0]?.id || null;
     }
 
     healTargetPlayerSelect.value = selectedHealTargetID || "";
+
+    if (healTargetLabel) {
+        healTargetLabel.textContent = isBuff ? "ENERGY TARGET" : "HEAL TARGET";
+    }
 }
 
 
@@ -1035,13 +1449,6 @@ healTargetPlayerSelect?.addEventListener("change", () => {
     renderPlayerGrid();
     renderPlayerPartyGrids();
 });
-
-
-function getHealTargetPlayer() {
-    return roomPlayers.find(
-        player => player.id === selectedHealTargetID
-    );
-}
 
 
 /* =====================================
@@ -1063,39 +1470,80 @@ function selectCombatCard(card) {
         return;
     }
 
-    if (card.type === "heal" && !canCreateHealCards()) {
-        combatCardMessage.textContent =
-            "Your class cannot use Heal cards.";
-
+    if (!isMyTurn()) {
+        combatCardMessage.textContent = "It is not your turn.";
         return;
     }
 
+    // Clear any previous targeting state first.
     selectedCombatCard = card;
 
     hoveredMonsterAnchor = null;
     hoveredHealAnchor = null;
+    selectedHealTargetID = null;
 
-    if (card.type === "heal") {
-        updateHealTargetOptions();
+    healTargetContainer.hidden = true;
+    buffConfirmButton.hidden = true;
 
-        healTargetContainer.hidden = false;
+    clearCombatTargetPreview();
 
-        combatCardMessage.textContent =
-            `${card.name} selected. Hover over your chosen player's grid to aim.`;
+    switch (card.type) {
+        case "heal":
+            updateHealTargetOptions();
 
-        renderPlayerGrid();
-        renderPlayerPartyGrids();
-    } else {
-        selectedHealTargetID = null;
-        healTargetContainer.hidden = true;
+            healTargetContainer.hidden = false;
 
-        combatCardMessage.textContent =
-            `${card.name} selected. Hover over the monster's grid to aim.`;
+            combatCardMessage.textContent =
+                `${card.name} selected. Hover over your chosen player's grid to aim.`;
+            break;
 
-        renderCombatMonsterGrid();
+        case "buff":
+            updateHealTargetOptions();
+
+            if (!selectedHealTargetID) {
+                combatCardMessage.textContent =
+                    "You have no teammates to give Energy to.";
+
+                selectedCombatCard = null;
+                break;
+            }
+
+            healTargetContainer.hidden = false;
+            buffConfirmButton.hidden = false;
+
+            combatCardMessage.textContent =
+                `${card.name} selected. Choose a teammate, then press GIVE ENERGY ` +
+                `(you spend ${card.targetCount}, they gain ${card.targetCount}).`;
+            break;
+
+        case "rage":
+            combatCardMessage.textContent =
+                `${card.name} selected. Hover over YOUR grid to choose the HP to sacrifice ` +
+                `(+${card.targetCount * RAGE_ENERGY_PER_POSITION} Energy).`;
+            break;
+
+        case "taunt":
+            combatAttackPending = true;
+
+            socket.emit("player-taunt", { cardID: card.id });
+
+            combatCardMessage.textContent =
+                `Using ${card.name}...`;
+            break;
+
+        default:
+            combatCardMessage.textContent =
+                `${card.name} selected. Hover over the monster's grid to aim.`;
+            break;
     }
 
     renderCombatCards();
+    renderPlayerGrid();
+    renderPlayerPartyGrids();
+
+    if (currentEncounter) {
+        renderCombatMonsterGrid();
+    }
 }
 
 
@@ -1112,7 +1560,8 @@ function cancelCardTargeting(showMessage = true) {
     selectedHealTargetID = null;
     combatAttackPending = false;
 
-    healTargetContainer.hidden = true;
+    if (healTargetContainer) healTargetContainer.hidden = true;
+    buffConfirmButton.hidden = true;
 
     clearCombatTargetPreview();
 
@@ -1131,6 +1580,28 @@ function cancelCardTargeting(showMessage = true) {
 }
 
 
+// Shared cleanup after one of my own actions resolves.
+function finishOwnAction(message) {
+    combatCardMessage.textContent = message;
+
+    selectedCombatCard = null;
+    selectedHealTargetID = null;
+    hoveredMonsterAnchor = null;
+    hoveredHealAnchor = null;
+    combatAttackPending = false;
+
+    healTargetContainer.hidden = true;
+    buffConfirmButton.hidden = true;
+
+    clearCombatTargetPreview();
+
+    renderCombatCards();
+    renderCombatMonsterGrid();
+    renderPlayerGrid();
+    renderPlayerPartyGrids();
+}
+
+
 /* =====================================
    RENDER COMBAT CARDS
 ===================================== */
@@ -1146,13 +1617,11 @@ function renderCombatCards() {
     }
 
     savedCards.forEach(card => {
-        const isHeal = card.type === "heal";
-
         const button = document.createElement("button");
 
         button.type = "button";
         button.className =
-            `saved-card combat-card-button ${isHeal ? "heal-card" : ""}`;
+            `saved-card combat-card-button ${card.type}-card`;
 
         button.classList.toggle(
             "selected",
@@ -1168,15 +1637,13 @@ function renderCombatCards() {
         title.textContent = card.name;
 
         const description = document.createElement("p");
-        description.textContent =
-            `${card.targetCount} Target Positions`;
+        description.textContent = describeCardEffect(card);
 
         const typeLabel = document.createElement("span");
-        typeLabel.className =
-            `combat-card-type ${isHeal ? "heal" : ""}`;
+        typeLabel.className = `combat-card-type ${card.type}`;
 
         typeLabel.textContent =
-            isHeal ? "HEAL CARD" : "ATTACK CARD";
+            CARD_TYPE_LABELS[card.type] || "CARD";
 
         info.append(title, description, typeLabel);
 
@@ -1220,7 +1687,7 @@ function updateCombatTargetPreview(anchor) {
 
     if (
         !selectedCombatCard ||
-        selectedCombatCard.type === "heal" ||
+        selectedCombatCard.type !== "attack" ||
         !currentEncounter ||
         combatAttackPending
     ) {
@@ -1252,7 +1719,7 @@ function updateCombatTargetPreview(anchor) {
 
 
 /* =====================================
-   HEAL TARGET PREVIEW
+   HEAL / RAGE TARGET PREVIEW
 ===================================== */
 
 function updateHealTargetPreview(anchor, gridSize, gridContainer) {
@@ -1260,7 +1727,7 @@ function updateHealTargetPreview(anchor, gridSize, gridContainer) {
 
     if (
         !selectedCombatCard ||
-        selectedCombatCard.type !== "heal" ||
+        !["heal", "rage"].includes(selectedCombatCard.type) ||
         !currentEncounter?.active ||
         combatAttackPending
     ) {
@@ -1373,6 +1840,60 @@ function confirmPlayerHeal(anchor, targetPlayer) {
 
 
 /* =====================================
+   CONFIRM PLAYER RAGE
+===================================== */
+
+function confirmPlayerRage(anchor) {
+    if (
+        !selectedCombatCard ||
+        selectedCombatCard.type !== "rage" ||
+        !currentEncounter?.active ||
+        combatAttackPending
+    ) {
+        return;
+    }
+
+    const positions = getCardTargetPositions(
+        selectedCombatCard,
+        anchor,
+        playerGridSize
+    );
+
+    if (!positions) {
+        combatCardMessage.textContent =
+            "Invalid placement. The pattern must fit inside your grid.";
+
+        return;
+    }
+
+    if (
+        positions.some(position =>
+            playerGridCells[position] !== "hp" &&
+            playerGridCells[position] !== "overheal"
+        )
+    ) {
+        combatCardMessage.textContent =
+            "Rage can only sacrifice HP or Overheal positions.";
+
+        return;
+    }
+
+    combatAttackPending = true;
+
+    socket.emit("player-rage", {
+        cardID: selectedCombatCard.id,
+        anchor
+    });
+
+    combatCardMessage.textContent =
+        `Unleashing ${selectedCombatCard.name}...`;
+
+    clearCombatTargetPreview();
+    renderCombatCards();
+}
+
+
+/* =====================================
    RENDER COMBAT MONSTER GRID
 ===================================== */
 
@@ -1414,13 +1935,20 @@ function renderCombatMonsterGrid() {
 
 
 /* =====================================
-   LEAVE MONSTER GRID
+   LEAVE GRIDS
 ===================================== */
 
 monsterGrid?.addEventListener("mouseleave", () => {
     if (selectedCombatCard?.type !== "attack") return;
 
     hoveredMonsterAnchor = null;
+    clearCombatTargetPreview();
+});
+
+heartGrid?.addEventListener("mouseleave", () => {
+    if (!["heal", "rage"].includes(selectedCombatCard?.type)) return;
+
+    hoveredHealAnchor = null;
     clearCombatTargetPreview();
 });
 
@@ -1438,6 +1966,7 @@ socket.on("combat-action-error", message => {
     renderCombatMonsterGrid();
     renderPlayerGrid();
     renderPlayerPartyGrids();
+    refreshThiefPanel();
 });
 
 
@@ -1447,16 +1976,10 @@ socket.on("combat-action-error", message => {
 
 socket.on("player-attack-resolved", result => {
     if (result.playerID === currentPlayerID) {
-        combatCardMessage.textContent =
+        finishOwnAction(
             `You used ${result.cardName}. ` +
-            `${result.damage} monster HP removed.`;
-
-        selectedCombatCard = null;
-        hoveredMonsterAnchor = null;
-        combatAttackPending = false;
-
-        renderCombatCards();
-
+            `${result.damage} monster HP removed.`
+        );
     } else if (currentRole === "player") {
         combatCardMessage.textContent =
             `${result.username} used ${result.cardName}. ` +
@@ -1468,36 +1991,71 @@ socket.on("player-attack-resolved", result => {
 });
 
 
-/* =====================================
-   HEAL RESULTS
-===================================== */
-
 socket.on("player-heal-resolved", result => {
-    const isHealer = result.playerID === currentPlayerID;
-
-    if (isHealer) {
-        const healed = result.healed ?? 0;
-        const overhealed = result.overhealed ?? 0;
-
-        combatCardMessage.textContent =
+    if (result.playerID === currentPlayerID) {
+        finishOwnAction(
             `You used ${result.cardName}. ` +
-            `${healed} HP restored · ${overhealed} Overheal added.`;
-
-        selectedCombatCard = null;
-        selectedHealTargetID = null;
-        hoveredHealAnchor = null;
-        combatAttackPending = false;
-
-        healTargetContainer.hidden = true;
-
-        renderCombatCards();
-        renderPlayerGrid();
-        renderPlayerPartyGrids();
-
+            `${result.healed ?? 0} HP restored · ${result.overhealed ?? 0} Overheal added.`
+        );
     } else if (currentRole === "player") {
         combatCardMessage.textContent =
-            `${result.username} used ${result.cardName}.`;
+            `${result.username} used ${result.cardName} on ${result.targetUsername}.`;
     }
+
+    clearCombatTargetPreview();
+});
+
+
+socket.on("player-buff-resolved", result => {
+    if (result.playerID === currentPlayerID) {
+        finishOwnAction(
+            `You gave ${result.energyTransferred} Energy to ${result.targetUsername}.`
+        );
+    } else if (currentRole === "player") {
+        combatCardMessage.textContent =
+            result.targetPlayerID === currentPlayerID
+                ? `${result.username} gave you ${result.energyTransferred} Energy!`
+                : `${result.username} gave ${result.energyTransferred} Energy to ${result.targetUsername}.`;
+    }
+});
+
+
+socket.on("player-rage-resolved", result => {
+    const sacrificed =
+        (result.healthSacrificed || 0) + (result.overhealSacrificed || 0);
+
+    if (result.playerID === currentPlayerID) {
+        finishOwnAction(
+            `You used ${result.cardName}. Sacrificed ${sacrificed} position(s), ` +
+            `gained ${result.energyGained} Energy.`
+        );
+    } else if (currentRole === "player") {
+        combatCardMessage.textContent =
+            `${result.username} used ${result.cardName} and gained ${result.energyGained} Energy.`;
+    }
+});
+
+
+socket.on("player-taunt-resolved", result => {
+    if (result.playerID === currentPlayerID) {
+        finishOwnAction(
+            `You used ${result.cardName}. The monster must hit you for ` +
+            `${result.remainingDamage} more hit(s).`
+        );
+    } else if (currentRole === "player") {
+        combatCardMessage.textContent =
+            `${result.username} taunted the monster! (${result.remainingDamage} hit(s) forced)`;
+    }
+});
+
+
+socket.on("monster-attack-resolved", result => {
+    if (currentRole !== "player") return;
+
+    combatCardMessage.textContent =
+        `The monster hit ${result.username} for ` +
+        `${result.positions.length} position(s).` +
+        (result.tauntRemaining === 0 ? " The Taunt has ended." : "");
 
     clearCombatTargetPreview();
 });
@@ -1569,14 +2127,23 @@ function renderPlayerGrid() {
         currentEncounter?.active &&
         !combatAttackPending;
 
-    heartGrid.classList.toggle("targeting", isHealTarget);
+    const isRageTarget =
+        currentRole === "player" &&
+        selectedCombatCard?.type === "rage" &&
+        currentEncounter?.active &&
+        !combatAttackPending;
+
+    const isSelfTarget = isHealTarget || isRageTarget;
+
+    heartGrid.classList.toggle("targeting", isSelfTarget);
+    heartGrid.classList.toggle("rage-targeting", isRageTarget);
 
     renderGrid(
         heartGrid,
         playerGridCells,
         playerGridSize,
         {
-            interactive: isHealTarget,
+            interactive: isSelfTarget,
 
             onHover: index => {
                 updateHealTargetPreview(
@@ -1587,6 +2154,11 @@ function renderPlayerGrid() {
             },
 
             onClick: index => {
+                if (isRageTarget) {
+                    confirmPlayerRage(index);
+                    return;
+                }
+
                 const target = roomPlayers.find(
                     player => player.id === currentPlayerID
                 );
@@ -1597,7 +2169,7 @@ function renderPlayerGrid() {
     );
 
     if (
-        isHealTarget &&
+        isSelfTarget &&
         hoveredHealAnchor !== null
     ) {
         updateHealTargetPreview(
@@ -1633,8 +2205,16 @@ function renderPartyGrid(player, container) {
 
     const heading = document.createElement("h3");
 
+    const energyText = player.energy !== undefined
+        ? ` · ${player.energy} Energy`
+        : "";
+
+    const statusText = player.status?.type === "thief"
+        ? ` · Poison ${player.status.remainingTurns}`
+        : "";
+
     heading.textContent =
-        `${player.username} · ${player.className}`;
+        `${player.username} · ${player.className}${energyText}${statusText}`;
 
     const grid = document.createElement("div");
 
@@ -1738,11 +2318,20 @@ socket.on("party-update", players => {
         if (ownPlayer) {
             playerGridSize = ownPlayer.gridSize;
             playerGridCells = [...ownPlayer.grid];
+            myStatus = ownPlayer.status || null;
             renderPlayerGrid();
         }
 
-        updateHealTargetOptions();
+        // Keep an open Buff/Heal target list fresh.
+        if (!healTargetContainer.hidden) {
+            updateHealTargetOptions();
+        } else {
+            updateHealTargetOptions();
+        }
+
         renderPlayerPartyGrids();
+        refreshThiefPanel();
+        refreshCombatStatusLine();
     }
 
     if (currentRole === "host") {
@@ -1863,12 +2452,19 @@ socket.on("encounter-state", encounter => {
             ? "Monster is active."
             : "Encounter has not started.";
 
-    combatStatus.textContent =
-        encounter.active
-            ? "COMBAT IN PROGRESS"
-            : "Encounter waiting to start.";
+    refreshCombatStatusLine();
 
     if (!encounter.active) {
+        cancelCardTargeting(false);
+    }
+
+    // If it stopped being my turn, drop any half-aimed card.
+    if (
+        currentRole === "player" &&
+        selectedCombatCard &&
+        !combatAttackPending &&
+        !isMyTurn()
+    ) {
         cancelCardTargeting(false);
     }
 
@@ -1882,6 +2478,7 @@ socket.on("encounter-state", encounter => {
 
     renderPlayerGrid();
     renderPlayerPartyGrids();
+    refreshThiefPanel();
 
     startEncounterButton.disabled = encounter.active;
     endEncounterButton.disabled = !encounter.active;
@@ -1894,6 +2491,11 @@ socket.on("encounter-state", encounter => {
 
         monsterNameInput.disabled = false;
         monsterGridSizeSelect.disabled = false;
+    }
+
+    if (currentRole === "host") {
+        applyTauntToTargetSelection();
+        refreshTauntBanner();
     }
 
     updateMonsterAttackControls();
@@ -1939,6 +2541,68 @@ const monsterAttackMessage =
     document.getElementById("monster-attack-message");
 
 
+/* ---------- Taunt banner (Host) ---------- */
+
+const tauntBanner = document.createElement("p");
+
+tauntBanner.className = "taunt-banner";
+tauntBanner.hidden = true;
+
+rollMonsterD10Button?.parentElement?.insertBefore(
+    tauntBanner,
+    rollMonsterD10Button.previousElementSibling
+);
+
+
+function getActiveTauntTank() {
+    const taunt = currentEncounter?.taunt;
+
+    if (!taunt) return null;
+
+    const tank = roomPlayers.find(player => player.id === taunt.tankID);
+
+    if (!tank) return null;
+
+    const hasHealth = tank.grid.some(
+        cell => cell === "hp" || cell === "overheal"
+    );
+
+    return hasHealth ? tank : null;
+}
+
+
+function refreshTauntBanner() {
+    const tank = getActiveTauntTank();
+
+    if (!tank || !currentEncounter?.active) {
+        tauntBanner.hidden = true;
+        return;
+    }
+
+    tauntBanner.hidden = false;
+
+    tauntBanner.textContent =
+        `TAUNT ACTIVE: the monster must target ${tank.username} ` +
+        `for ${currentEncounter.taunt.remainingDamage} more hit(s).`;
+}
+
+
+// When Taunt is active the Tank is the only legal target.
+function applyTauntToTargetSelection() {
+    if (!monsterTargetPlayer) return;
+
+    const tank = getActiveTauntTank();
+
+    if (!tank || monsterAttackRoll === null) return;
+
+    if (monsterTargetPlayer.value !== tank.id) {
+        monsterTargetPlayer.value = tank.id;
+        selectedTargetPositions.clear();
+        renderHostTargetGrid();
+    }
+}
+
+
 rollMonsterD10Button?.addEventListener("click", () => {
     socket.emit("roll-monster-d10");
 
@@ -1954,10 +2618,15 @@ socket.on("monster-d10-result", result => {
 
     monsterD10Result.textContent = result;
 
-    monsterAttackMessage.textContent =
-        `The monster rolled ${result}. Select a player and up to ${result} target positions.`;
+    const tank = getActiveTauntTank();
+
+    monsterAttackMessage.textContent = tank
+        ? `The monster rolled ${result}. Taunt forces it to hit ${tank.username} ` +
+          `(max ${Math.min(result, currentEncounter.taunt.remainingDamage)} positions).`
+        : `The monster rolled ${result}. Select a player and up to ${result} target positions.`;
 
     updateMonsterTargetOptions();
+    applyTauntToTargetSelection();
     renderHostTargetGrid();
     updateMonsterAttackControls();
 });
@@ -1994,7 +2663,10 @@ function updateMonsterTargetOptions() {
     monsterTargetPlayer.disabled =
         !currentEncounter?.active ||
         monsterAttackRoll === null ||
-        roomPlayers.length === 0;
+        roomPlayers.length === 0 ||
+        Boolean(getActiveTauntTank());
+
+    refreshTauntBanner();
 }
 
 
@@ -2019,6 +2691,9 @@ function getSelectedTargetPlayer() {
     and can only choose cells that can actually be hit
     (HP or Overheal), so a player with few hearts left
     can't dodge by having the monster waste hits on empty cells.
+
+    If the selected player is the taunting Tank, the number is also
+    capped by how much Taunt is left.
 */
 function getMaxMonsterTargets() {
     const player = getSelectedTargetPlayer();
@@ -2029,7 +2704,15 @@ function getMaxMonsterTargets() {
         cell => cell === "hp" || cell === "overheal"
     ).length;
 
-    return Math.min(monsterAttackRoll, hittable);
+    let max = Math.min(monsterAttackRoll, hittable);
+
+    const taunt = currentEncounter?.taunt;
+
+    if (taunt && taunt.tankID === player.id) {
+        max = Math.min(max, taunt.remainingDamage);
+    }
+
+    return max;
 }
 
 
@@ -2086,14 +2769,20 @@ function updateMonsterAttackControls() {
     const max = getMaxMonsterTargets();
     const selected = selectedTargetPositions.size;
 
+    const turn = currentEncounter?.currentTurn;
+    const isMonsterTurn = turn?.type === "monster";
+
     rollMonsterD10Button.disabled =
         !hasActiveEncounter ||
+        !isMonsterTurn ||
+        Boolean(currentEncounter?.monsterHasActed) ||
         hasRoll;
 
     monsterTargetPlayer.disabled =
         !hasActiveEncounter ||
         !hasRoll ||
-        roomPlayers.length === 0;
+        roomPlayers.length === 0 ||
+        Boolean(getActiveTauntTank());
 
     monsterTargetCount.textContent =
         hasRoll
@@ -2139,6 +2828,8 @@ socket.on("monster-attack-error", message => {
 
 
 socket.on("monster-attack-resolved", result => {
+    if (currentRole !== "host") return;
+
     monsterAttackRoll = null;
 
     selectedTargetPositions.clear();
@@ -2147,9 +2838,11 @@ socket.on("monster-attack-resolved", result => {
     monsterTargetPlayer.value = "";
 
     monsterAttackMessage.textContent =
-        `${result.username} was attacked at ${result.positions.length} position(s).`;
+        `${result.username} was attacked at ${result.positions.length} position(s).` +
+        (result.tauntRemaining === 0 ? " The Taunt has ended." : "");
 
     renderHostTargetGrid();
+    updateMonsterTargetOptions();
     updateMonsterAttackControls();
 });
 
@@ -2166,6 +2859,7 @@ socket.on("room-closed", () => {
 
     activeAssignment = null;
     savedCards = [];
+    myStatus = null;
 
     currentEncounter = null;
     monsterAttackRoll = null;
@@ -2181,7 +2875,12 @@ socket.on("room-closed", () => {
     combatAttackPending = false;
 
     healTargetContainer.hidden = true;
+    buffConfirmButton.hidden = true;
     cardTypeContainer.hidden = true;
+    thiefStatusPanel.hidden = true;
+    tauntBanner.hidden = true;
+
+    if (cardCreatorSection) cardCreatorSection.hidden = false;
 
     playerRegistration.hidden = false;
     playerLobbyInfo.hidden = true;
