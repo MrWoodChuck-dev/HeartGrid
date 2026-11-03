@@ -38,18 +38,57 @@ const CLASS_GRID_SIZES = {
 const HEALING_CLASSES = ["Support", "Mage"];
 
 const ALLOWED_CARD_TYPES = {
-    Tank: ["attack", "taunt"],
-    Warrior: ["attack", "rage"],
-    Mage: ["attack", "heal"],
-    Support: ["heal", "buff"],
-    Thief: ["attack"]
+    Tank: ["attack", "taunt", "retaliate"],
+    Warrior: ["attack", "rage", "counter"],
+    Mage: ["attack", "heal", "curse"],
+    Support: ["heal", "buff", "weaken"],
+    Thief: ["attack", "status", "lifesteal"]
 };
 
 // Every class except Support can use Attack cards.
 const ATTACK_CLASSES = ["Tank", "Warrior", "Mage", "Thief"];
 
 // Card types that use the 3x3 pattern editor.
-const PATTERN_CARD_TYPES = ["attack", "heal", "rage"];
+const PATTERN_CARD_TYPES = [
+    "attack",
+    "heal",
+    "rage",
+    "lifesteal",
+    "retaliate",
+    "curse"
+];
+
+/*
+    Position limits for the expensive cards. The Energy cap is 9, so a
+    card that would cost more than 9 could never be used.
+
+    Lifesteal: 2 Energy per position   -> 2-4 positions (max 8)
+    Counter / Curse / Weaken: 1.5x     -> 2-6 positions (max 9)
+*/
+const CARD_RULES = {
+    lifesteal: { min: 2, max: 4 },
+    counter: { min: 2, max: 6 },
+    curse: { min: 2, max: 6 },
+    weaken: { min: 2, max: 6 }
+};
+
+// Energy cost of using a card. 1.5x costs remain fractional.
+function getCardCost(card) {
+    const n = card.targetCount;
+
+    switch (card.type) {
+        case "rage":
+            return 0;
+        case "lifesteal":
+            return n * 2;
+        case "counter":
+        case "curse":
+        case "weaken":
+            return n * 1.5;
+        default:
+            return n;
+    }
+}
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -91,8 +130,10 @@ function regeneratePlayerEnergy(player) {
     }
 }
 
-function getPublicPlayer(player) {
-    return {
+// Retaliate marks are secret from the Host, so they are only included
+// when the state is sent to a player.
+function getPublicPlayer(player, includeMarks = false) {
+    const publicPlayer = {
         id: player.id,
         username: player.username,
         className: player.className,
@@ -101,14 +142,23 @@ function getPublicPlayer(player) {
         cardCount: player.cards.length,
         hasAssignment: Boolean(player.assignment),
         energy: player.energy ?? 0,
+        counterTurns: player.counterTurns ?? 0,
         status: player.status
             ? { ...player.status }
             : null
     };
+
+    if (includeMarks) {
+        publicPlayer.marks = [...(player.marks || [])];
+    }
+
+    return publicPlayer;
 }
 
-function getPartyState(room) {
-    return Array.from(room.players.values()).map(getPublicPlayer);
+function getPartyState(room, includeMarks = false) {
+    return Array.from(room.players.values()).map(
+        player => getPublicPlayer(player, includeMarks)
+    );
 }
 
 function getRoomState(roomID) {
@@ -116,7 +166,8 @@ function getRoomState(roomID) {
 
     if (!room) return null;
 
-    const players = getPartyState(room);
+    // This is only sent to the Host, so no marks.
+    const players = getPartyState(room, false);
     const takenClasses = players.map(player => player.className);
 
     return {
@@ -133,7 +184,48 @@ function getRoomState(roomID) {
 ===================================== */
 
 function getCurrentTurn(room) {
+    // While a Counter turn is running it replaces the normal turn.
+    if (room.counterTurn) {
+        const base = room.initiativeOrder?.find(
+            participant =>
+                participant.type === "player" &&
+                participant.id === room.counterTurn.playerID
+        );
+
+        return base
+            ? { ...base, counter: true }
+            : null;
+    }
+
     return room.initiativeOrder?.[room.turnIndex] || null;
+}
+
+function getMonsterEffects(room) {
+    const players = Array.from(room.players.values());
+
+    // The Counter turn that is running right now still counts, the same way
+    // the turn order shows it.
+    const counter =
+        players.reduce(
+            (total, player) => total + (player.counterTurns || 0),
+            0
+        ) + (room.counterTurn ? 1 : 0);
+
+    const status = players.reduce(
+        (total, player) =>
+            total +
+            (player.status?.type === "thief"
+                ? Math.max(0, player.status.remainingTurns || 0)
+                : 0),
+        0
+    );
+
+    return {
+        taunt: Math.max(0, room.taunt?.remainingDamage || 0),
+        weaken: Math.max(0, room.weaken || 0),
+        counter,
+        status
+    };
 }
 
 function getEncounterState(room) {
@@ -146,7 +238,23 @@ function getEncounterState(room) {
         active: room.encounter.active,
         initiativeOrder: room.initiativeOrder || [],
         currentTurn: getCurrentTurn(room),
+        // Keep bonus Counter turns visible to the Host as well as players.
+        counterPlayers: Array.from(room.players.values())
+            .filter(player => (player.counterTurns || 0) > 0 || room.counterTurn?.playerID === player.id)
+            .map(player => ({
+                playerID: player.id,
+                username: player.username,
+                counterTurns: player.counterTurns || 0,
+                active: room.counterTurn?.playerID === player.id
+            })),
         monsterHasActed: room.monsterHasActed || false,
+
+        weaken: room.weaken || 0,
+        curses: [...(room.encounter.curses || [])],
+
+        // Shown in the Monster's Effects panel (Host and players).
+        // Taunt and Weaken are Charges; Counter and Status are Turns.
+        effects: getMonsterEffects(room),
 
         taunt: room.taunt
             ? {
@@ -165,10 +273,15 @@ function updateRoom(roomID) {
 
     io.to(room.host).emit("room-state", getRoomState(roomID));
 
-    io.to(roomID).emit(
-        "party-update",
-        getPartyState(room)
-    );
+    // Players see each other's Retaliate marks. The Host does not.
+    const withMarks = getPartyState(room, true);
+    const withoutMarks = getPartyState(room, false);
+
+    for (const player of room.players.values()) {
+        io.to(player.id).emit("party-update", withMarks);
+    }
+
+    io.to(room.host).emit("party-update", withoutMarks);
 }
 
 function updateEncounter(roomID) {
@@ -189,6 +302,8 @@ function sendPlayerState(player) {
         gridSize: player.gridSize,
         grid: player.grid,
         energy: player.energy ?? 0,
+        counterTurns: player.counterTurns ?? 0,
+        marks: [...(player.marks || [])],
         status: player.status
             ? { ...player.status }
             : null
@@ -208,6 +323,15 @@ function emitTurnState(roomID) {
     }
 }
 
+// Sends the full data to players and the reduced data to the Host.
+function emitToPlayersAndHost(room, eventName, fullData, hostData) {
+    for (const player of room.players.values()) {
+        io.to(player.id).emit(eventName, fullData);
+    }
+
+    io.to(room.host).emit(eventName, hostData ?? fullData);
+}
+
 /* =====================================
    GRID HELPERS
 ===================================== */
@@ -220,6 +344,96 @@ function getHittablePositions(grid) {
     return grid
         .map((cell, index) => isHittable(cell) ? index : -1)
         .filter(index => index !== -1);
+}
+
+function getHealthyMonsterPositions(encounter) {
+    return encounter.grid
+        .map((cell, index) => cell === "hp" ? index : -1)
+        .filter(index => index !== -1);
+}
+
+/* =====================================
+   MONSTER DAMAGE (WITH CURSE CHAINS)
+===================================== */
+
+/*
+    Every source of damage to the monster goes through here:
+    attacks, Lifesteal, poison, Retaliate, and Curse explosions.
+
+    A cursed position that is damaged explodes: the positions up, down,
+    left and right of it are damaged too. Those can be cursed as well,
+    which makes a chain reaction. Each curse only explodes once.
+*/
+function damageMonsterCells(room, positions, source = "attack") {
+    const encounter = room.encounter;
+    const size = encounter.size;
+    const curses = encounter.curses;
+
+    const exploded = [];
+
+    // Visual chain for the clients: step 0 is everything hit directly,
+    // step 1 is everything hurt by the explosions of step 0, and so on.
+    // Each cell says whether it was cursed so the client can shake it first.
+    const steps = [];
+
+    let damage = 0;
+    let current = [];
+
+    positions.forEach(position => {
+        if (encounter.grid[position] === "hp") {
+            encounter.grid[position] = "empty";
+            damage++;
+            current.push(position);
+        }
+    });
+
+    while (current.length > 0) {
+        steps.push({
+            cells: current.map(index => ({
+                index,
+                cursed: curses.has(index)
+            }))
+        });
+
+        const next = [];
+
+        current.forEach(cell => {
+            if (!curses.has(cell)) return;
+
+            curses.delete(cell);
+            exploded.push(cell);
+
+            const row = Math.floor(cell / size);
+            const column = cell % size;
+
+            [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dRow, dColumn]) => {
+                const r = row + dRow;
+                const c = column + dColumn;
+
+                if (r < 0 || r >= size || c < 0 || c >= size) return;
+
+                const index = r * size + c;
+
+                if (encounter.grid[index] === "hp") {
+                    encounter.grid[index] = "empty";
+                    damage++;
+                    next.push(index);
+                }
+            });
+        });
+
+        current = next;
+    }
+
+    // Everyone (Host included) gets the same animation order.
+    if (steps.length > 0) {
+        io.to(room.roomID).emit("monster-damage-fx", {
+            source,
+            steps
+        });
+    }
+
+    return { damage, exploded };
 }
 
 /* =====================================
@@ -280,7 +494,14 @@ function calculateCardPositions(card, anchor, gridSize) {
 
 // Returns the acting player if this is a valid combat action, otherwise
 // emits an error and returns null.
-function getActingPlayer(socket, room, className = null, classError = null) {
+function getActingPlayer(
+    socket,
+    room,
+    className = null,
+    classError = null,
+    isAttackCard = false,
+    allowRageDuringCounter = false
+) {
     if (!isPlayer(socket, room)) return null;
 
     const player = room.players.get(socket.id);
@@ -295,6 +516,21 @@ function getActingPlayer(socket, room, className = null, classError = null) {
         return null;
     }
 
+    // Counter turns are bonus Warrior actions. Attack is the normal action;
+    // Rage may be used as a setup action when its handler explicitly allows it.
+    if (
+        getCurrentTurn(room)?.counter &&
+        !isAttackCard &&
+        !allowRageDuringCounter
+    ) {
+        socket.emit(
+            "combat-action-error",
+            "During a Counter turn you can only use an Attack card or Rage."
+        );
+
+        return null;
+    }
+
     if (className && player.className !== className) {
         socket.emit("combat-action-error", classError || `Only ${className} can do that.`);
         return null;
@@ -303,11 +539,80 @@ function getActingPlayer(socket, room, className = null, classError = null) {
     return player;
 }
 
+// A player is dead when their grid has no HP or Overheal left.
+function isDead(player) {
+    return getHittablePositions(player.grid).length === 0;
+}
+
+// Dead players lose their turn. The monster is never skipped,
+// so this loop always ends.
+function skipDeadTurns(room) {
+    const total = room.initiativeOrder?.length || 0;
+
+    for (let i = 0; i < total; i++) {
+        const turn = getCurrentTurn(room);
+
+        if (turn?.type !== "player") return;
+
+        const member = room.players.get(turn.id);
+
+        if (member && !isDead(member)) return;
+
+        room.turnIndex = (room.turnIndex + 1) % total;
+    }
+}
+
 // A player whose Energy hits 0 automatically ends their turn.
 function endTurnIfOutOfEnergy(room, player) {
-    if (player.energy <= 0) {
+    if (player.energy > 0) return;
+
+    // Rage costs 0 Energy and GIVES Energy, so a Warrior at 0 Energy who still
+    // holds a Rage card and has HP to sacrifice keeps their turn (they can
+    // still press End Turn manually).
+    const canStillRage =
+        player.className === "Warrior" &&
+        !isDead(player) &&
+        player.cards.some(card => card.type === "rage");
+
+    if (canStillRage) return;
+
+    advanceTurn(room);
+}
+
+// Called after a player finishes using a card. A Counter turn is a
+// single attack, so it ends right after the Warrior's attack.
+function finishPlayerAction(room, player) {
+    if (room.counterTurn) {
         advanceTurn(room);
+        return;
     }
+
+    endTurnIfOutOfEnergy(room, player);
+}
+
+/* =====================================
+   COUNTER (WARRIOR)
+===================================== */
+
+function canAffordAnAttack(player) {
+    return player.cards.some(
+        card =>
+            card.type === "attack" &&
+            player.energy >= getCardCost(card)
+    );
+}
+
+// The Warrior who gets to Counter after the monster's attack, if any.
+function findCounteringWarrior(room) {
+    // A stored Counter charge grants a bonus turn to a living Warrior.
+    // Do not require Energy or an Attack card here: the Warrior still gets
+    // the turn and may use an available legal action or simply end it.
+    return Array.from(room.players.values()).find(
+        player =>
+            player.className === "Warrior" &&
+            (player.counterTurns || 0) > 0 &&
+            !isDead(player)
+    ) || null;
 }
 
 /* =====================================
@@ -322,66 +627,40 @@ function resolveThiefStatus(room, thief) {
         return;
     }
 
-    const possibleTargets = [];
-
-    for (const player of room.players.values()) {
-        const positions = getHittablePositions(player.grid);
-
-        if (positions.length > 0) {
-            possibleTargets.push({
-                player,
-                positions
-            });
-        }
-    }
+    // Poison only ever hits the MONSTER's grid. No friendly fire.
+    const encounter = room.encounter;
 
     let result = {
         thiefID: thief.id,
         thiefUsername: thief.username,
-        targetPlayerID: null,
-        targetUsername: null,
+        monsterName: encounter?.name || "the monster",
         positions: [],
         damage: 0,
-        overhealDamage: 0,
         damageRoll: 0
     };
 
-    if (possibleTargets.length > 0) {
-        // Randomly choose a player's HP grid.
-        const selectedTarget = possibleTargets[
-            crypto.randomInt(0, possibleTargets.length)
-        ];
+    if (encounter?.active) {
+        const healthyPositions = getHealthyMonsterPositions(encounter);
 
-        // Randomly deal either 1 or 2 damage.
-        const damageRoll = crypto.randomInt(1, 3);
+        if (healthyPositions.length > 0) {
+            // Randomly deal either 1 or 2 damage.
+            const damageRoll = crypto.randomInt(1, 3);
 
-        const positions = shuffle(selectedTarget.positions).slice(
-            0,
-            Math.min(damageRoll, selectedTarget.positions.length)
-        );
+            const positions = shuffle(healthyPositions).slice(
+                0,
+                Math.min(damageRoll, healthyPositions.length)
+            );
 
-        let damage = 0;
-        let overhealDamage = 0;
+            // Goes through the shared damage code so Curses can chain.
+            const hit = damageMonsterCells(room, positions, "status");
 
-        positions.forEach(position => {
-            if (selectedTarget.player.grid[position] === "overheal") {
-                selectedTarget.player.grid[position] = "hp";
-                overhealDamage++;
-            } else {
-                selectedTarget.player.grid[position] = "empty";
-                damage++;
-            }
-        });
-
-        result = {
-            ...result,
-            targetPlayerID: selectedTarget.player.id,
-            targetUsername: selectedTarget.player.username,
-            positions,
-            damage,
-            overhealDamage,
-            damageRoll
-        };
+            result = {
+                ...result,
+                positions,
+                damage: hit.damage,
+                damageRoll
+            };
+        }
     }
 
     thief.status.remainingTurns--;
@@ -406,22 +685,67 @@ function resolveThiefStatus(room, thief) {
 function advanceTurn(room) {
     if (!room.initiativeOrder?.length) return;
 
-    const currentTurn = getCurrentTurn(room);
+    if (room.counterTurn) {
+        // The Counter turn is over: resume the order that was interrupted.
+        room.turnIndex =
+            room.counterTurn.resumeIndex % room.initiativeOrder.length;
 
-    // Resolve Thief Status when the Thief finishes their turn.
-    if (currentTurn?.type === "player") {
-        const currentPlayer = room.players.get(currentTurn.id);
+        room.counterTurn = null;
+    } else {
+        const currentTurn = getCurrentTurn(room);
 
-        if (currentPlayer) {
-            resolveThiefStatus(room, currentPlayer);
+        // Resolve Thief Status when the Thief finishes their turn.
+        if (currentTurn?.type === "player") {
+            const currentPlayer = room.players.get(currentTurn.id);
+
+            if (currentPlayer) {
+                resolveThiefStatus(room, currentPlayer);
+            }
         }
+
+        // Counter is a bonus turn after the Monster's turn, whether the monster
+        // attacked, was ended early by the Host, or was skipped by Weaken.
+        // Resolve Counter BEFORE advancing the natural initiative index.
+        // This matters when the monster is the final participant: the Counter
+        // interrupt must run first, then resume at index 0 in the next cycle.
+        if (currentTurn?.type === "monster") {
+            const warrior = findCounteringWarrior(room);
+
+            if (warrior) {
+                warrior.counterTurns--;
+
+                room.counterTurn = {
+                    playerID: warrior.id,
+                    // Save the exact natural next turn. If the monster is last,
+                    // this correctly wraps to the first participant.
+                    resumeIndex: (room.turnIndex + 1) % room.initiativeOrder.length
+                };
+
+                room.attackRoll = null;
+                room.monsterHasActed = false;
+                room.monsterAttackedThisTurn = false;
+
+                io.to(room.roomID).emit("counter-turn-started", {
+                    playerID: warrior.id,
+                    username: warrior.username,
+                    counterTurnsLeft: warrior.counterTurns
+                });
+
+                // No Energy regeneration during a Counter turn.
+                return;
+            }
+        }
+
+        room.turnIndex =
+            (room.turnIndex + 1) % room.initiativeOrder.length;
     }
 
-    room.turnIndex =
-        (room.turnIndex + 1) % room.initiativeOrder.length;
+    // Skip anyone who is dead.
+    skipDeadTurns(room);
 
     room.attackRoll = null;
     room.monsterHasActed = false;
+    room.monsterAttackedThisTurn = false;
 
     const nextTurn = getCurrentTurn(room);
 
@@ -446,6 +770,23 @@ function isPlayersTurn(socket, room) {
 
 function isMonstersTurn(room) {
     return getCurrentTurn(room)?.type === "monster";
+}
+
+// Clears every per-encounter effect on the room and its players.
+function resetEncounterEffects(room) {
+    room.attackRoll = null;
+    room.monsterHasActed = false;
+    room.monsterAttackedThisTurn = false;
+    room.taunt = null;
+    room.weaken = 0;
+    room.counterTurn = null;
+
+    for (const player of room.players.values()) {
+        player.energy = STARTING_ENERGY;
+        player.status = null;
+        player.marks = new Set();
+        player.counterTurns = 0;
+    }
 }
 
 function startInitiative(room) {
@@ -481,15 +822,14 @@ function startInitiative(room) {
 
     room.initiativeOrder = participants;
     room.turnIndex = 0;
-    room.monsterHasActed = false;
-    room.attackRoll = null;
-    room.taunt = null;
 
-    // Everyone starts with 5 Energy.
-    for (const player of room.players.values()) {
-        player.energy = STARTING_ENERGY;
-        player.status = null;
-    }
+    // Everyone starts with 5 Energy and no leftover effects.
+    resetEncounterEffects(room);
+
+    room.encounter.curses = new Set();
+
+    // Anyone who is already dead does not get to go first.
+    skipDeadTurns(room);
 }
 
 function removePlayerFromInitiative(room, playerID) {
@@ -504,8 +844,13 @@ function removePlayerFromInitiative(room, playerID) {
     if (removedIndex === -1) return;
 
     const currentIndex = room.turnIndex;
+    const counter = room.counterTurn;
 
     room.initiativeOrder.splice(removedIndex, 1);
+
+    if (counter && removedIndex < counter.resumeIndex) {
+        counter.resumeIndex--;
+    }
 
     if (removedIndex < currentIndex) {
         room.turnIndex--;
@@ -518,8 +863,24 @@ function removePlayerFromInitiative(room, playerID) {
         room.monsterHasActed = false;
     }
 
+    // The Warrior left in the middle of their Counter turn.
+    if (counter && counter.playerID === playerID) {
+        room.counterTurn = null;
+
+        if (room.initiativeOrder.length > 0) {
+            room.turnIndex =
+                counter.resumeIndex % room.initiativeOrder.length;
+        }
+
+        room.attackRoll = null;
+        room.monsterHasActed = false;
+    }
+
     if (room.initiativeOrder.length === 0) {
         room.turnIndex = 0;
+        room.counterTurn = null;
+    } else {
+        skipDeadTurns(room);
     }
 }
 
@@ -575,6 +936,9 @@ io.on("connection", socket => {
             initiativeOrder: [],
             turnIndex: 0,
             monsterHasActed: false,
+            monsterAttackedThisTurn: false,
+            counterTurn: null,
+            weaken: 0,
             taunt: null
         });
 
@@ -690,7 +1054,9 @@ io.on("connection", socket => {
             gridSize,
             grid: createGrid(gridSize),
             energy: STARTING_ENERGY,
-            status: null
+            status: null,
+            marks: new Set(),
+            counterTurns: 0
         };
 
         room.players.set(socket.id, player);
@@ -747,11 +1113,7 @@ io.on("connection", socket => {
             return;
         }
 
-        // Thieves never hold cards, so the card limit does not apply to them.
-        if (
-            player.className !== "Thief" &&
-            player.cards.length >= MAX_CARDS
-        ) {
+        if (player.cards.length >= MAX_CARDS) {
             socket.emit(
                 "assignment-error",
                 "Player has four cards. They must discard one first."
@@ -839,6 +1201,20 @@ io.on("connection", socket => {
             return;
         }
 
+        // Expensive cards only work with certain position counts,
+        // because their Energy cost must fit under the cap of 9.
+        const rule = CARD_RULES[cardType];
+
+        if (rule && (targetCount < rule.min || targetCount > rule.max)) {
+            socket.emit(
+                "card-save-error",
+                `${cardType.toUpperCase()} cards can only have ${rule.min}-${rule.max} positions. ` +
+                `This assignment has ${targetCount}.`
+            );
+
+            return;
+        }
+
         if (!name || name.length > 24) {
             socket.emit(
                 "card-save-error",
@@ -848,8 +1224,7 @@ io.on("connection", socket => {
             return;
         }
 
-        // Buff and Taunt do not need a 3x3 pattern.
-        // Attack, Heal, and Rage do.
+        // Buff, Taunt, Status, Counter and Weaken do not need a 3x3 pattern.
         if (PATTERN_CARD_TYPES.includes(cardType)) {
             if (
                 !Array.isArray(pattern) ||
@@ -893,39 +1268,30 @@ io.on("connection", socket => {
     });
 
     /* =====================================
-       THIEF STATUS ACTIVATION
+       THIEF STATUS CARD
     ===================================== */
 
-    socket.on("activate-thief-status", () => {
+    socket.on("player-status", data => {
         const roomID = socket.data.roomID;
         const room = rooms.get(roomID);
 
-        if (!isPlayer(socket, room)) return;
+        const player = getActingPlayer(
+            socket,
+            room,
+            "Thief",
+            "Only Thief can use Status cards."
+        );
 
-        const player = room.players.get(socket.id);
+        if (!player) return;
 
-        if (player.className !== "Thief") {
+        const card = player.cards.find(
+            item => item.id === data?.cardID
+        );
+
+        if (!card || card.type !== "status") {
             socket.emit(
                 "combat-action-error",
-                "Only Thief can activate Status."
-            );
-
-            return;
-        }
-
-        if (!room.encounter?.active || !isPlayersTurn(socket, room)) {
-            socket.emit(
-                "combat-action-error",
-                "You can only activate Status during your turn."
-            );
-
-            return;
-        }
-
-        if (!player.assignment) {
-            socket.emit(
-                "combat-action-error",
-                "You need a Host assignment before activating Status."
+                "Invalid Status card."
             );
 
             return;
@@ -941,12 +1307,12 @@ io.on("connection", socket => {
         }
 
         // Position count = number of turns = Energy cost.
-        const duration = player.assignment.targetCount;
+        const duration = card.targetCount;
 
         if (player.energy < duration) {
             socket.emit(
                 "combat-action-error",
-                "Not enough Energy to activate Status."
+                "Not enough Energy to use this Status card."
             );
 
             return;
@@ -959,21 +1325,20 @@ io.on("connection", socket => {
             remainingTurns: duration
         };
 
-        player.assignment = null;
-
-        socket.emit("thief-status-activated", {
+        io.to(roomID).emit("player-status-resolved", {
+            playerID: player.id,
+            username: player.username,
+            cardName: card.name,
             duration,
             energySpent: duration,
-            remainingEnergy: player.energy,
-            message: `Status activated for ${duration} turns.`
+            remainingEnergy: player.energy
         });
 
-        endTurnIfOutOfEnergy(room, player);
-
+        finishPlayerAction(room, player);
         emitTurnState(roomID);
 
         console.log(
-            `${player.username} activated Thief Status for ${duration} turns.`
+            `${player.username} used Status card ${card.name} for ${duration} turns.`
         );
     });
 
@@ -1078,19 +1443,14 @@ io.on("connection", socket => {
             name,
             size,
             grid: createGrid(size),
-            active: false
+            active: false,
+            curses: new Set()
         };
 
-        room.attackRoll = null;
         room.initiativeOrder = [];
         room.turnIndex = 0;
-        room.monsterHasActed = false;
-        room.taunt = null;
 
-        for (const player of room.players.values()) {
-            player.energy = STARTING_ENERGY;
-            player.status = null;
-        }
+        resetEncounterEffects(room);
 
         socket.emit(
             "encounter-created",
@@ -1165,18 +1525,62 @@ io.on("connection", socket => {
         if (!isHost(socket, room) || !room.encounter) return;
 
         room.encounter.active = false;
-        room.attackRoll = null;
+        room.encounter.curses = new Set();
+
         room.initiativeOrder = [];
         room.turnIndex = 0;
-        room.monsterHasActed = false;
-        room.taunt = null;
 
-        for (const player of room.players.values()) {
-            player.energy = STARTING_ENERGY;
-            player.status = null;
-        }
+        resetEncounterEffects(room);
 
         emitTurnState(roomID);
+    });
+
+    /* =====================================
+       HOST REVIVES A DEAD PLAYER
+    ===================================== */
+
+    socket.on("revive-player", data => {
+        const roomID = socket.data.roomID;
+        const room = rooms.get(roomID);
+
+        if (!isHost(socket, room)) return;
+
+        const player = room.players.get(data?.playerID);
+
+        if (!player) {
+            socket.emit("revive-error", "Player not found.");
+            return;
+        }
+
+        if (!isDead(player)) {
+            socket.emit(
+                "revive-error",
+                `${player.username} is not dead.`
+            );
+
+            return;
+        }
+
+        // Soft reset: full HP and starting Energy. Cards are kept.
+        player.grid = createGrid(player.gridSize);
+        player.energy = STARTING_ENERGY;
+        player.status = null;
+        player.marks = new Set();
+        player.counterTurns = 0;
+
+        // A revived Tank starts fresh, without a leftover Taunt.
+        if (room.taunt?.tankID === player.id) {
+            room.taunt = null;
+        }
+
+        io.to(roomID).emit("player-revived", {
+            playerID: player.id,
+            username: player.username
+        });
+
+        emitTurnState(roomID);
+
+        console.log(`${player.username} was revived by the Host.`);
     });
 
     /* =====================================
@@ -1227,15 +1631,11 @@ io.on("connection", socket => {
             return;
         }
 
-        if (room.attackRoll !== null) {
-            socket.emit(
-                "turn-error",
-                "Resolve the pending monster attack first."
-            );
-
-            return;
-        }
-
+        // Ending the turn early forfeits any unused positions from the roll.
+        // advanceTurn checks monsterAttackedThisTurn BEFORE changing the natural
+        // initiative index, so a Counter is never skipped when the Monster is last.
+        // Do not clear the marker here: advanceTurn owns its consumption/reset.
+        room.attackRoll = null;
         advanceTurn(room);
         emitTurnState(roomID);
     });
@@ -1280,11 +1680,51 @@ io.on("connection", socket => {
             return;
         }
 
-        const result = crypto.randomInt(1, 11);
+        const rolled = crypto.randomInt(1, 11);
 
-        room.attackRoll = result;
+        // Each Weaken point fully negates one selectable monster attack
+        // position. Any unused negation carries into the next monster turn.
+        const weaken = Math.max(0, Number(room.weaken) || 0);
 
-        socket.emit("monster-d10-result", result);
+        if (weaken > 0) {
+            const positionsNegated = Math.min(weaken, rolled);
+            const effective = Math.max(0, rolled - positionsNegated);
+
+            room.weaken = weaken - positionsNegated;
+
+            const info = {
+                monsterName: room.encounter.name,
+                roll: rolled,
+                positionsNegated,
+                absorbed: positionsNegated, // compatibility with existing clients
+                effective,
+                skipped: effective === 0,
+                weakenLeft: room.weaken
+            };
+
+            if (effective <= 0) {
+                // Every rolled attack position was negated; the monster skips its turn.
+                io.to(roomID).emit("monster-weakened", info);
+
+                advanceTurn(room);
+                emitTurnState(roomID);
+
+                return;
+            }
+
+            room.attackRoll = effective;
+
+            socket.emit("monster-d10-result", effective);
+            io.to(roomID).emit("monster-weakened", info);
+
+            updateEncounter(roomID);
+
+            return;
+        }
+
+        room.attackRoll = rolled;
+
+        socket.emit("monster-d10-result", rolled);
     });
 
     /* =====================================
@@ -1413,14 +1853,27 @@ io.on("connection", socket => {
 
         let damage = 0;
         let overhealDamage = 0;
+        let retaliations = 0;
+
+        // For the hit animation: which cells lost HP, which lost Overheal.
+        const emptiedPositions = [];
+        const overhealLostPositions = [];
 
         positions.forEach(position => {
             if (player.grid[position] === "overheal") {
                 player.grid[position] = "hp";
                 overhealDamage++;
+                overhealLostPositions.push(position);
             } else if (player.grid[position] === "hp") {
                 player.grid[position] = "empty";
                 damage++;
+                emptiedPositions.push(position);
+
+                // A damaged Retaliate mark strikes back (once).
+                if (player.marks?.has(position)) {
+                    player.marks.delete(position);
+                    retaliations++;
+                }
             }
         });
 
@@ -1437,23 +1890,67 @@ io.on("connection", socket => {
             }
         }
 
+        // The D10 roll is a pool of positions. Spend what was used
+        // and keep the rest for more attacks this turn.
+        const rolled = room.attackRoll;
+
+        let remaining = rolled - positions.length;
+
+        // If nobody has HP left to hit, the leftover is lost.
+        const anyoneHittable = Array.from(room.players.values()).some(
+            member => getHittablePositions(member.grid).length > 0
+        );
+
+        if (!anyoneHittable) {
+            remaining = 0;
+        }
+
         const result = {
             playerID: player.id,
             username: player.username,
             positions,
-            roll: room.attackRoll,
+            emptiedPositions,
+            overhealLostPositions,
+            roll: rolled,
+            remaining: Math.max(0, remaining),
             damage,
             overhealDamage,
             tauntRemaining
         };
 
-        room.attackRoll = null;
-        room.monsterHasActed = true;
+        if (remaining > 0) {
+            room.attackRoll = remaining;
+        } else {
+            room.attackRoll = null;
+            room.monsterHasActed = true;
+        }
+
+        // The monster attacked this turn, so Counter can trigger later.
+        room.monsterAttackedThisTurn = true;
 
         io.to(roomID).emit(
             "monster-attack-resolved",
             result
         );
+
+        // Retaliate: each damaged mark hits a random healthy monster position.
+        if (retaliations > 0) {
+            const targets = shuffle(
+                getHealthyMonsterPositions(room.encounter)
+            ).slice(0, retaliations);
+
+            const hit = damageMonsterCells(room, targets, "retaliate");
+
+            // Only players are told (the Host can't see the marks).
+            for (const member of room.players.values()) {
+                io.to(member.id).emit("retaliate-triggered", {
+                    playerID: player.id,
+                    username: player.username,
+                    triggered: retaliations,
+                    damage: hit.damage
+                });
+            }
+        }
 
         sendPlayerState(player);
         updateRoom(roomID);
@@ -1461,14 +1958,14 @@ io.on("connection", socket => {
     });
 
     /* =====================================
-       PLAYER ATTACK - MAGE
+       PLAYER ATTACK
     ===================================== */
 
     socket.on("player-attack", data => {
         const roomID = socket.data.roomID;
         const room = rooms.get(roomID);
 
-        const player = getActingPlayer(socket, room);
+        const player = getActingPlayer(socket, room, null, null, true);
 
         if (!player) return;
 
@@ -1520,14 +2017,7 @@ io.on("connection", socket => {
             return;
         }
 
-        let damage = 0;
-
-        positions.forEach(position => {
-            if (encounter.grid[position] === "hp") {
-                encounter.grid[position] = "empty";
-                damage++;
-            }
-        });
+        const hit = damageMonsterCells(room, positions);
 
         player.energy -= card.targetCount;
 
@@ -1536,16 +2026,213 @@ io.on("connection", socket => {
             username: player.username,
             cardName: card.name,
             positions,
-            damage,
+            damage: hit.damage,
+            exploded: hit.exploded.length,
             energySpent: card.targetCount,
             remainingEnergy: player.energy
         });
 
-        endTurnIfOutOfEnergy(room, player);
+        finishPlayerAction(room, player);
         emitTurnState(roomID);
 
         console.log(
-            `${player.username} attacked ${encounter.name} with ${card.name}. Damage: ${damage}`
+            `${player.username} attacked ${encounter.name} with ${card.name}. Damage: ${hit.damage}`
+        );
+    });
+
+    /* =====================================
+       THIEF LIFESTEAL
+    ===================================== */
+
+    socket.on("player-lifesteal", data => {
+        const roomID = socket.data.roomID;
+        const room = rooms.get(roomID);
+
+        const player = getActingPlayer(
+            socket,
+            room,
+            "Thief",
+            "Only Thief can use Lifesteal cards."
+        );
+
+        if (!player) return;
+
+        const encounter = room.encounter;
+
+        const card = player.cards.find(
+            item => item.id === data?.cardID
+        );
+
+        if (!card || card.type !== "lifesteal") {
+            socket.emit(
+                "combat-action-error",
+                "Invalid Lifesteal card."
+            );
+
+            return;
+        }
+
+        const cost = getCardCost(card);
+
+        if (player.energy < cost) {
+            socket.emit(
+                "combat-action-error",
+                `Not enough Energy. Lifesteal costs ${cost}.`
+            );
+
+            return;
+        }
+
+        const monsterPositions = calculateCardPositions(
+            card,
+            data?.monsterAnchor,
+            encounter.size
+        );
+
+        const healPositions = calculateCardPositions(
+            card,
+            data?.healAnchor,
+            player.gridSize
+        );
+
+        if (!monsterPositions || !healPositions) {
+            socket.emit(
+                "combat-action-error",
+                "The monster or healing pattern does not fit inside its grid."
+            );
+            return;
+        }
+
+        const hit = damageMonsterCells(room, monsterPositions, "lifesteal");
+        player.energy -= cost;
+
+        // Heal only selected EMPTY cells, capped by actual damage. No random
+        // placement and no Overheal: occupied selected cells remain unchanged.
+        const healable = healPositions.filter(
+            position => player.grid[position] === "empty"
+        );
+        const healedPositions = healable.slice(
+            0,
+            Math.min(hit.damage, healable.length)
+        );
+        healedPositions.forEach(position => {
+            player.grid[position] = "hp";
+        });
+
+        io.to(roomID).emit("player-lifesteal-resolved", {
+            playerID: player.id,
+            username: player.username,
+            cardName: card.name,
+            positions: monsterPositions,
+            healPositions: healedPositions,
+            damage: hit.damage,
+            exploded: hit.exploded.length,
+            healed: healedPositions.length,
+            energySpent: cost,
+            remainingEnergy: player.energy
+        });
+
+        finishPlayerAction(room, player);
+        emitTurnState(roomID);
+
+        console.log(
+            `${player.username} used Lifesteal. Damage: ${hit.damage}, Healed: ${healedPositions.length}`
+        );
+    });
+
+    /* =====================================
+       MAGE CURSE
+    ===================================== */
+
+    socket.on("player-curse", data => {
+        const roomID = socket.data.roomID;
+        const room = rooms.get(roomID);
+
+        const player = getActingPlayer(
+            socket,
+            room,
+            "Mage",
+            "Only Mage can use Curse cards."
+        );
+
+        if (!player) return;
+
+        const encounter = room.encounter;
+
+        const card = player.cards.find(
+            item => item.id === data?.cardID
+        );
+
+        if (!card || card.type !== "curse") {
+            socket.emit(
+                "combat-action-error",
+                "Invalid Curse card."
+            );
+
+            return;
+        }
+
+        const cost = getCardCost(card);
+
+        if (player.energy < cost) {
+            socket.emit(
+                "combat-action-error",
+                `Not enough Energy. Curse costs ${cost}.`
+            );
+
+            return;
+        }
+
+        const positions = calculateCardPositions(
+            card,
+            data?.anchor,
+            encounter.size
+        );
+
+        if (!positions) {
+            socket.emit(
+                "combat-action-error",
+                "That pattern does not fit there."
+            );
+
+            return;
+        }
+
+        // Only healthy, not-yet-cursed positions can be marked.
+        const markable = positions.filter(
+            position =>
+                encounter.grid[position] === "hp" &&
+                !encounter.curses.has(position)
+        );
+
+        if (markable.length === 0) {
+            socket.emit(
+                "combat-action-error",
+                "There is nothing to curse there. Aim at healthy, uncursed positions."
+            );
+
+            return;
+        }
+
+        markable.forEach(position => encounter.curses.add(position));
+
+        player.energy -= cost;
+
+        io.to(roomID).emit("player-curse-resolved", {
+            playerID: player.id,
+            username: player.username,
+            cardName: card.name,
+            positions: markable,
+            marked: markable.length,
+            energySpent: cost,
+            remainingEnergy: player.energy
+        });
+
+        finishPlayerAction(room, player);
+        emitTurnState(roomID);
+
+        console.log(
+            `${player.username} cursed ${markable.length} positions with ${card.name}`
         );
     });
 
@@ -1607,6 +2294,15 @@ io.on("connection", socket => {
             return;
         }
 
+        if (isDead(target)) {
+            socket.emit(
+                "combat-action-error",
+                `${target.username} is dead and cannot be healed. Ask the Host to revive them.`
+            );
+
+            return;
+        }
+
         const positions = calculateCardPositions(
             card,
             data?.anchor,
@@ -1626,13 +2322,23 @@ io.on("connection", socket => {
         let overhealed = 0;
         let unchanged = 0;
 
+        // For the heal animation.
+        const healedPositions = [];
+        const overhealedPositions = [];
+
         positions.forEach(position => {
             if (target.grid[position] === "empty") {
                 target.grid[position] = "hp";
                 healed++;
-            } else if (target.grid[position] === "hp") {
+                healedPositions.push(position);
+            } else if (
+                target.grid[position] === "hp" &&
+                !target.marks?.has(position)
+            ) {
+                // Retaliate-marked HP can't be Overhealed.
                 target.grid[position] = "overheal";
                 overhealed++;
+                overhealedPositions.push(position);
             } else {
                 unchanged++;
             }
@@ -1647,6 +2353,8 @@ io.on("connection", socket => {
             targetUsername: target.username,
             cardName: card.name,
             positions,
+            healedPositions,
+            overhealedPositions,
             healed,
             overhealed,
             unchanged,
@@ -1654,7 +2362,7 @@ io.on("connection", socket => {
             remainingEnergy: player.energy
         });
 
-        endTurnIfOutOfEnergy(room, player);
+        finishPlayerAction(room, player);
         emitTurnState(roomID);
 
         console.log(
@@ -1713,6 +2421,15 @@ io.on("connection", socket => {
             return;
         }
 
+        if (isDead(target)) {
+            socket.emit(
+                "combat-action-error",
+                `${target.username} is dead and cannot receive Energy. Ask the Host to revive them.`
+            );
+
+            return;
+        }
+
         // Support pays the cost, the teammate receives the same amount.
         player.energy -= card.targetCount;
         target.energy += card.targetCount;
@@ -1728,12 +2445,76 @@ io.on("connection", socket => {
             targetEnergy: target.energy
         });
 
-        endTurnIfOutOfEnergy(room, player);
+        finishPlayerAction(room, player);
         emitTurnState(roomID);
 
         console.log(
             `${player.username} buffed ${target.username} with ${card.name}. ` +
             `Energy transferred: ${card.targetCount}`
+        );
+    });
+
+    /* =====================================
+       SUPPORT WEAKEN
+    ===================================== */
+
+    socket.on("player-weaken", data => {
+        const roomID = socket.data.roomID;
+        const room = rooms.get(roomID);
+
+        const player = getActingPlayer(
+            socket,
+            room,
+            "Support",
+            "Only Support can use Weaken cards."
+        );
+
+        if (!player) return;
+
+        const card = player.cards.find(
+            item => item.id === data?.cardID
+        );
+
+        if (!card || card.type !== "weaken") {
+            socket.emit(
+                "combat-action-error",
+                "Invalid Weaken card."
+            );
+
+            return;
+        }
+
+        const cost = getCardCost(card);
+
+        if (player.energy < cost) {
+            socket.emit(
+                "combat-action-error",
+                `Not enough Energy. Weaken costs ${cost}.`
+            );
+
+            return;
+        }
+
+        player.energy -= cost;
+
+        // Each Weaken point negates one monster attack position on its next roll.
+        room.weaken = (room.weaken || 0) + card.targetCount;
+
+        io.to(roomID).emit("player-weaken-resolved", {
+            playerID: player.id,
+            username: player.username,
+            cardName: card.name,
+            added: card.targetCount,
+            weaken: room.weaken,
+            energySpent: cost,
+            remainingEnergy: player.energy
+        });
+
+        finishPlayerAction(room, player);
+        emitTurnState(roomID);
+
+        console.log(
+            `${player.username} used Weaken. Total Weaken: ${room.weaken}`
         );
     });
 
@@ -1749,7 +2530,9 @@ io.on("connection", socket => {
             socket,
             room,
             "Warrior",
-            "Only Warrior can use Rage cards."
+            "Only Warrior can use Rage cards.",
+            false,
+            true
         );
 
         if (!player) return;
@@ -1800,14 +2583,20 @@ io.on("connection", socket => {
         let healthSacrificed = 0;
         let overhealSacrificed = 0;
 
+        // For the Rage animation.
+        const healthPositions = [];
+        const overhealPositions = [];
+
         // HP is lost; Overheal is stripped back down to plain HP.
         positions.forEach(position => {
             if (player.grid[position] === "overheal") {
                 player.grid[position] = "hp";
                 overhealSacrificed++;
+                overhealPositions.push(position);
             } else {
                 player.grid[position] = "empty";
                 healthSacrificed++;
+                healthPositions.push(position);
             }
         });
 
@@ -1822,17 +2611,88 @@ io.on("connection", socket => {
             username: player.username,
             cardName: card.name,
             positions,
+            healthPositions,
+            overhealPositions,
             healthSacrificed,
             overhealSacrificed,
             energyGained,
             remainingEnergy: player.energy
         });
 
+        // Raging away your last HP is fatal, and the dead do not take turns.
+        if (isDead(player)) {
+            advanceTurn(room);
+        }
+
         emitTurnState(roomID);
 
         console.log(
             `${player.username} used Rage. ` +
             `Positions taken: ${positions.length}, Energy gained: ${energyGained}`
+        );
+    });
+
+    /* =====================================
+       WARRIOR COUNTER
+    ===================================== */
+
+    socket.on("player-counter", data => {
+        const roomID = socket.data.roomID;
+        const room = rooms.get(roomID);
+
+        const player = getActingPlayer(
+            socket,
+            room,
+            "Warrior",
+            "Only Warrior can use Counter cards."
+        );
+
+        if (!player) return;
+
+        const card = player.cards.find(
+            item => item.id === data?.cardID
+        );
+
+        if (!card || card.type !== "counter") {
+            socket.emit(
+                "combat-action-error",
+                "Invalid Counter card."
+            );
+
+            return;
+        }
+
+        const cost = getCardCost(card);
+
+        if (player.energy < cost) {
+            socket.emit(
+                "combat-action-error",
+                `Not enough Energy. Counter costs ${cost}.`
+            );
+
+            return;
+        }
+
+        player.energy -= cost;
+
+        // Each position is one Counter Turn. Counter stacks.
+        player.counterTurns = (player.counterTurns || 0) + card.targetCount;
+
+        io.to(roomID).emit("player-counter-resolved", {
+            playerID: player.id,
+            username: player.username,
+            cardName: card.name,
+            added: card.targetCount,
+            counterTurns: player.counterTurns,
+            energySpent: cost,
+            remainingEnergy: player.energy
+        });
+
+        finishPlayerAction(room, player);
+        emitTurnState(roomID);
+
+        console.log(
+            `${player.username} used Counter. Counter turns: ${player.counterTurns}`
         );
     });
 
@@ -1907,12 +2767,119 @@ io.on("connection", socket => {
             remainingEnergy: player.energy
         });
 
-        endTurnIfOutOfEnergy(room, player);
+        finishPlayerAction(room, player);
         emitTurnState(roomID);
 
         console.log(
             `${player.username} activated Taunt. ` +
             `Forced damage remaining: ${room.taunt?.remainingDamage}`
+        );
+    });
+
+    /* =====================================
+       TANK RETALIATE
+    ===================================== */
+
+    socket.on("player-retaliate", data => {
+        const roomID = socket.data.roomID;
+        const room = rooms.get(roomID);
+
+        const player = getActingPlayer(
+            socket,
+            room,
+            "Tank",
+            "Only Tank can use Retaliate cards."
+        );
+
+        if (!player) return;
+
+        const card = player.cards.find(
+            item => item.id === data?.cardID
+        );
+
+        if (!card || card.type !== "retaliate") {
+            socket.emit(
+                "combat-action-error",
+                "Invalid Retaliate card."
+            );
+
+            return;
+        }
+
+        const cost = getCardCost(card);
+
+        if (player.energy < cost) {
+            socket.emit(
+                "combat-action-error",
+                "Not enough Energy to use this card."
+            );
+
+            return;
+        }
+
+        // Retaliate marks the Tank's own grid.
+        const positions = calculateCardPositions(
+            card,
+            data?.anchor,
+            player.gridSize
+        );
+
+        if (!positions) {
+            socket.emit(
+                "combat-action-error",
+                "That Retaliate pattern does not fit on your grid."
+            );
+
+            return;
+        }
+
+        // Marks only go on plain HP (never Overheal or empty), once each.
+        if (
+            positions.some(position =>
+                player.grid[position] !== "hp" ||
+                player.marks.has(position)
+            )
+        ) {
+            socket.emit(
+                "combat-action-error",
+                "Retaliate can only mark HP that is not Overheal and not already marked."
+            );
+
+            return;
+        }
+
+        positions.forEach(position => player.marks.add(position));
+
+        player.energy -= cost;
+
+        // Players see which positions were marked. The Host only sees a count.
+        emitToPlayersAndHost(
+            room,
+            "player-retaliate-resolved",
+            {
+                playerID: player.id,
+                username: player.username,
+                cardName: card.name,
+                positions,
+                marked: positions.length,
+                energySpent: cost,
+                remainingEnergy: player.energy
+            },
+            {
+                playerID: player.id,
+                username: player.username,
+                cardName: card.name,
+                marked: positions.length,
+                energySpent: cost,
+                remainingEnergy: player.energy
+            }
+        );
+
+        finishPlayerAction(room, player);
+        emitTurnState(roomID);
+
+        console.log(
+            `${player.username} set ${positions.length} Retaliate marks with ${card.name}`
         );
     });
 

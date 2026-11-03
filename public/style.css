@@ -1276,3 +1276,944 @@ button {
         height: 29px;
     }
 }
+
+
+/* =====================================
+   MAGE — CURSE
+===================================== */
+
+/* Permanently marked monster cells */
+.grid-cell.curse-mark {
+    outline: 2px solid #9b63d2;
+    outline-offset: -3px;
+    background: rgba(155, 99, 210, 0.35) !important;
+    box-shadow: inset 0 0 0 2px rgba(155, 99, 210, 0.4);
+}
+
+/* While aiming a Curse card */
+#monster-grid.curse-targeting .grid-cell.target-preview {
+    outline-color: #9b63d2;
+    background: rgba(155, 99, 210, 0.25);
+    box-shadow: 0 0 10px rgba(155, 99, 210, 0.5);
+}
+
+/* Curse card label */
+.combat-card-type.curse {
+    color: #8d55c7;
+    opacity: 1;
+}
+
+/* Selected Curse card */
+.combat-card-button.curse-card.selected {
+    border-color: #9b63d2;
+    background: rgba(155, 99, 210, 0.12);
+}
+
+
+/* COMPACT ICON-BASED CARDS */
+.compact-card-face {
+    position: relative;
+    width: 126px;
+    height: 126px;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(150, 150, 150, .35);
+    border-radius: 9px;
+    background: rgba(0, 0, 0, .12);
+    overflow: hidden;
+}
+.compact-card-pattern {
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 1;
+}
+.compact-card-pattern i {
+    display: block;
+    min-width: 0;
+    border-radius: 1px;
+    background: rgba(130, 130, 130, .22);
+    border: 1px solid rgba(150, 150, 150, .28);
+}
+.compact-card-pattern i.active {
+    background: var(--red, #d94848);
+    border-color: var(--red-light, #ef7777);
+}
+.compact-card-pattern.count-only {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(150, 150, 150, .45);
+    border-radius: 5px;
+}
+.compact-card-energy {
+    position: absolute;
+    top: 8px;
+    right: 7px;
+    max-width: calc(100% - 52px);
+    font-size: 9px;
+    line-height: 1.2;
+    font-weight: 700;
+    text-align: right;
+    white-space: nowrap;
+}
+.compact-card-icon {
+    display: block;
+    width: 76px;
+    height: 76px;
+    object-fit: contain;
+    pointer-events: none;
+}
+.compact-card-icon-fallback {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+.saved-card {
+    align-items: center;
+}
+.saved-card .compact-card-face {
+    flex: 0 0 126px;
+}
+.saved-card-info h3 {
+    margin-bottom: 0;
+}
+@media (max-width: 520px) {
+    .saved-card {
+        gap: 10px;
+        padding: 10px;
+    }
+    .saved-card .compact-card-face {
+        width: 104px;
+        height: 104px;
+        flex-basis: 104px;
+    }
+    .saved-card .compact-card-icon {
+        width: 64px;
+        height: 64px;
+    }
+    .saved-card .compact-card-energy {
+        font-size: 8px;
+    }
+}
+
+
+/* =====================================
+   ENERGY ICON  (assets/energy.png)
+===================================== */
+
+/* The PNG has transparent padding; crop to the bolt so it lines up with text. */
+.energy-icon {
+    --energy-icon-size: 1.15em;
+    display: inline-block;
+    flex: none;
+    height: var(--energy-icon-size);
+    width: calc(var(--energy-icon-size) * 64 / 173);
+    background-image: url("/assets/energy.png");
+    background-repeat: no-repeat;
+    background-size:
+        calc(var(--energy-icon-size) * 139 / 173)
+        calc(var(--energy-icon-size) * 195 / 173);
+    background-position:
+        calc(var(--energy-icon-size) * -31 / 173)
+        calc(var(--energy-icon-size) * -18 / 173);
+    vertical-align: -0.2em;
+}
+
+.energy-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    white-space: nowrap;
+}
+
+.energy-icons {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 1px;
+}
+
+/* Overflow (more than 9 Energy): three bolts instead of one. */
+.energy-icons.is-overflow .energy-icon {
+    animation: energy-icon-pop 0.35s ease both;
+}
+
+.energy-icons.is-overflow .energy-icon:nth-child(2) { animation-delay: 0.06s; }
+.energy-icons.is-overflow .energy-icon:nth-child(3) { animation-delay: 0.12s; }
+
+@keyframes energy-icon-pop {
+    from { opacity: 0; transform: translateY(5px) scale(0.6); }
+    to   { opacity: 1; transform: none; }
+}
+
+
+/* =====================================
+   ENERGY DISPLAY - YELLOW
+===================================== */
+
+.energy-heading .energy-readout {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #f2b600;
+    font-size: 18px;
+    -webkit-text-stroke: 0.6px rgba(92, 62, 0, 0.6);
+    paint-order: stroke fill;
+}
+
+.energy-readout .energy-icon,
+.energy-bar-row .energy-icon {
+    --energy-icon-size: 22px;
+}
+
+.energy-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.energy-bar-row .energy-track {
+    flex: 1;
+    margin-top: 0;
+}
+
+.energy-fill {
+    background: #f5c400;
+}
+
+.energy-display.is-overflow .energy-fill {
+    box-shadow: 0 0 9px rgba(245, 196, 0, 0.85);
+}
+
+
+/* =====================================
+   TURN ORDER (host list)  -  same look as the player Battle Status
+===================================== */
+
+.initiative-player {
+    gap: 12px;
+}
+
+.initiative-number,
+.active-turn .initiative-number {
+    background: #3a3a3a;
+    color: #f2efe6;
+    font-weight: 800;
+}
+
+.initiative-details {
+    gap: 2px;
+}
+
+.initiative-details strong {
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.initiative-details span {
+    font-size: 11px;
+    letter-spacing: 0;
+    line-height: 1.2;
+    color: #98978f;
+    opacity: 1;
+}
+
+
+/* =====================================
+   CARD COST LABEL  (icon: number)
+===================================== */
+
+.compact-card-energy {
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.compact-card-energy .energy-icon {
+    --energy-icon-size: 15px;
+}
+
+.compact-card-energy {
+    max-width: calc(100% - 46px);
+}
+
+
+/* =====================================
+   CARD ZOOM  -  hover a card to read it
+===================================== */
+
+#card-zoom {
+    position: fixed;
+    z-index: 9400;
+    width: min(250px, 72vw);
+    pointer-events: none;
+}
+
+.zoom-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 340px;
+    padding: 14px 14px 16px;
+    border: 3px solid var(--card-color, #666);
+    border-radius: 16px;
+    background: #f7f5ef;
+    color: #252525;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.4);
+    animation: zoom-card-in 0.16s ease-out both;
+}
+
+@keyframes zoom-card-in {
+    from { opacity: 0; transform: scale(0.55); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+.zoom-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--card-color, #666);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+}
+
+.zoom-card-cost {
+    color: #252525;
+    font-size: 16px;
+    letter-spacing: 0;
+}
+
+.zoom-card-cost .energy-icon {
+    --energy-icon-size: 20px;
+}
+
+.zoom-card-name {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
+.zoom-card-art {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.06);
+    background: color-mix(in srgb, var(--card-color, #666) 14%, #ffffff);
+}
+
+.zoom-card-art img {
+    display: block;
+    width: 84px;
+    height: 84px;
+    object-fit: contain;
+}
+
+.zoom-card-pattern {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 3px;
+    width: 62px;
+    height: 62px;
+}
+
+.zoom-card-pattern i {
+    display: block;
+    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.14);
+}
+
+.zoom-card-pattern i.active {
+    background: var(--card-color, #666);
+}
+
+.zoom-card-count {
+    display: grid;
+    place-items: center;
+    width: 54px;
+    height: 54px;
+    border: 2px solid var(--card-color, #666);
+    border-radius: 10px;
+    color: var(--card-color, #666);
+    font-size: 28px;
+    font-weight: 800;
+}
+
+.zoom-card-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.zoom-card-stats span {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    background: rgba(0, 0, 0, 0.07);
+}
+
+.zoom-card-stats .energy-icon {
+    --energy-icon-size: 14px;
+}
+
+.zoom-card-desc {
+    margin: 0;
+    color: #2f2f2f;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.zoom-card-hint {
+    margin: auto 0 0;
+    padding-top: 8px;
+    border-top: 1px solid rgba(0, 0, 0, 0.12);
+    color: #6a6a64;
+    font-size: 11px;
+    text-align: center;
+}
+
+
+/* =====================================
+   ACTIVE AREA  +  DRAGGING
+===================================== */
+
+.active-area {
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 4px;
+    min-height: 112px;
+    margin: 0 0 16px;
+    padding: 14px;
+    border: 2px dashed #8a8a84;
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.03);
+    text-align: center;
+    transition: border-color 0.15s ease, background 0.15s ease,
+        box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+.active-area-label {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 3px;
+}
+
+.active-area-hint {
+    max-width: 38ch;
+    font-size: 12px;
+    line-height: 1.45;
+    opacity: 0.7;
+}
+
+.active-area.is-disabled {
+    opacity: 0.5;
+}
+
+.active-area.drag-ready {
+    border-color: #f0b400;
+    background: rgba(240, 180, 0, 0.1);
+    animation: active-area-pulse 1.1s ease-in-out infinite;
+}
+
+.active-area.drag-over {
+    border-style: solid;
+    background: rgba(240, 180, 0, 0.28);
+    box-shadow: 0 0 0 4px rgba(240, 180, 0, 0.25);
+    transform: scale(1.015);
+    animation: none;
+}
+
+.active-area.is-locked {
+    border-style: solid;
+    border-color: var(--green);
+    background: rgba(67, 166, 107, 0.12);
+    opacity: 1;
+}
+
+.active-area.is-blocked {
+    animation: active-area-shake 0.4s ease;
+}
+
+@keyframes active-area-pulse {
+    50% { box-shadow: 0 0 0 5px rgba(240, 180, 0, 0.2); }
+}
+
+@keyframes active-area-shake {
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+}
+
+.combat-card-button:focus-visible {
+    outline: 3px solid #f0b400;
+    outline-offset: 2px;
+}
+
+.drag-ghost {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 9500;
+    margin: 0;
+    background: #f0eeee;
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    transform: translate(-50%, -50%) rotate(4deg) scale(1.12);
+    transition: transform 0.12s ease;
+}
+
+.drag-ghost.over {
+    transform: translate(-50%, -50%) rotate(0deg) scale(0.92);
+}
+
+body.is-dragging-card,
+body.is-dragging-card * {
+    cursor: grabbing !important;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+
+/* =====================================
+   FULL-SCREEN TARGETING OVERLAY
+===================================== */
+
+body.play-overlay-open {
+    overflow: hidden;
+}
+
+.play-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 18px 22px;
+    overflow: auto;
+    background: #101114;
+    color: #f2efe6;
+    animation: play-overlay-in 0.18s ease-out both;
+}
+
+@keyframes play-overlay-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.play-overlay-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+.play-overlay-face .compact-card-face {
+    width: 104px;
+    height: 104px;
+    flex: none;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--card-color, #888);
+}
+
+.play-overlay-face .compact-card-icon {
+    width: 54px;
+    height: 54px;
+    margin-top: 16px;
+}
+
+.play-overlay-kicker {
+    color: var(--card-color, #bbb);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    filter: brightness(1.35);
+}
+
+.play-overlay-title {
+    margin: 3px 0 6px;
+    font-size: 24px;
+    overflow-wrap: anywhere;
+}
+
+.play-overlay-instruction {
+    margin: 0;
+    color: #d8d6ce;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.play-overlay-picker {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+.play-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 132px;
+    padding: 10px 16px;
+    border: 2px solid #4a4d55;
+    border-radius: 10px;
+    background: #23252b;
+    color: #f2efe6;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.play-chip strong {
+    font-size: 17px;
+}
+
+.play-chip small {
+    color: #a9a79f;
+    font-size: 11px;
+}
+
+.play-chip:hover:not(:disabled) {
+    border-color: #9fa3ad;
+}
+
+.play-chip.selected {
+    border-color: #7ab8f5;
+    background: #2c3a4d;
+}
+
+.play-chip:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Buff: bigger options, each showing that class's Energy. */
+.play-overlay-picker.is-buff {
+    flex: 1;
+    align-content: center;
+}
+
+.play-overlay-picker.is-buff .play-chip {
+    min-width: 190px;
+    padding: 18px 22px;
+    gap: 6px;
+}
+
+.play-overlay-picker.is-buff .play-chip strong {
+    font-size: 22px;
+}
+
+.play-overlay-picker.is-buff .play-chip:hover:not(:disabled) {
+    border-color: #f0b400;
+    background: #34301f;
+}
+
+.play-chip-energy {
+    margin-top: 4px;
+    color: #f5c400;
+    font-size: 20px;
+    font-weight: 800;
+}
+
+.play-chip-energy .energy-icon {
+    --energy-icon-size: 24px;
+}
+
+.play-overlay-empty {
+    margin: 0;
+    color: #d8d6ce;
+}
+
+.play-overlay-stage {
+    display: grid;
+    flex: 1;
+    min-height: 0;
+    place-items: center;
+}
+
+.play-grid.heart-grid {
+    width: min(92vw, calc(100dvh - 300px), 640px);
+    min-width: 220px;
+    margin: 0;
+    padding: 14px;
+    border-radius: 16px;
+    background: #2d3036;
+}
+
+.play-grid .grid-cell {
+    border-color: #4a4d55;
+    cursor: crosshair;
+}
+
+.play-grid .grid-cell.empty {
+    background: #1b1d21;
+    border-color: #3a3d44;
+}
+
+.play-grid.is-pending {
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+.play-grid .grid-cell.target-invalid {
+    outline: 2px dashed #e34b4b;
+    background: #6d2626;
+    opacity: 0.9;
+}
+
+/* Preview colour per card type */
+.play-grid.play-attack .grid-cell.target-preview,
+.play-grid.play-rage .grid-cell.target-preview {
+    outline-color: var(--red-light);
+    background: var(--red);
+    box-shadow: 0 0 14px rgba(217, 72, 72, 0.7);
+}
+
+.play-grid.play-heal .grid-cell.target-preview {
+    outline-color: #9fd0ff;
+    background: #5b9fe3;
+    box-shadow: 0 0 14px rgba(57, 134, 214, 0.7);
+}
+
+.play-grid.play-retaliate .grid-cell.target-preview {
+    outline-color: #f2d24a;
+    background: rgba(255, 220, 65, 0.55);
+    box-shadow: 0 0 14px rgba(226, 189, 36, 0.7);
+}
+
+.play-grid.play-curse .grid-cell.target-preview {
+    outline-color: #c79bf2;
+    background: rgba(155, 99, 210, 0.6);
+    box-shadow: 0 0 14px rgba(155, 99, 210, 0.7);
+}
+
+.play-grid.play-lifesteal-monster .grid-cell.target-preview {
+    outline-color: #f08fb4;
+    background: rgba(192, 57, 107, 0.6);
+    box-shadow: 0 0 14px rgba(192, 57, 107, 0.7);
+}
+
+.play-grid.play-lifesteal-self .grid-cell.target-preview {
+    outline-color: var(--green-light);
+    background: rgba(122, 221, 196, 0.45);
+    box-shadow: 0 0 14px rgba(122, 221, 196, 0.6);
+}
+
+.play-overlay-message {
+    min-height: 22px;
+    margin: 0;
+    color: #f5c400;
+    font-size: 14px;
+    text-align: center;
+}
+
+@media (max-width: 520px) {
+    .play-overlay {
+        padding: 12px 12px 16px;
+    }
+
+    .play-overlay-face .compact-card-face {
+        width: 84px;
+        height: 84px;
+    }
+
+    .play-overlay-face .compact-card-icon {
+        width: 44px;
+        height: 44px;
+        margin-top: 14px;
+    }
+
+    .play-overlay-title {
+        font-size: 20px;
+    }
+
+    .play-grid.heart-grid {
+        width: min(94vw, calc(100dvh - 330px));
+    }
+}
+
+
+/* =====================================
+   GRID ANIMATIONS (FX)
+===================================== */
+
+/* Old-cell copy laid over the new cell. It plays out and removes itself. */
+.grid-cell > .fx-ghost {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    pointer-events: none;
+    border-radius: inherit;
+    transform-origin: center;
+    animation-duration: var(--fx-dur, 300ms);
+    animation-delay: var(--fx-delay, 0ms);
+    animation-fill-mode: both;
+    animation-timing-function: linear;
+}
+
+.fx-ghost .fx-body {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    border-radius: inherit;
+}
+
+.fx-look-hp {
+    background: var(--green);
+    border: 1px solid var(--green);
+}
+
+.fx-look-overheal {
+    background: var(--blue);
+    border: 1px solid var(--blue);
+}
+
+.fx-look-curse {
+    border: 1px solid #333;
+    background:
+        linear-gradient(rgba(155, 99, 210, 0.35), rgba(155, 99, 210, 0.35)),
+        #242424;
+    outline: 2px solid #9b63d2;
+    outline-offset: -3px;
+    box-shadow: inset 0 0 0 2px rgba(155, 99, 210, 0.4);
+}
+
+/* ATTACK: quick pop */
+.fx-ghost.fx-pop {
+    animation-name: fx-pop;
+    animation-timing-function: ease-out;
+}
+
+@keyframes fx-pop {
+    0%   { transform: scale(1);    opacity: 1; }
+    45%  { transform: scale(1.28); opacity: 1; }
+    100% { transform: scale(1.55); opacity: 0; }
+}
+
+/* CURSE: shakes while slowly enlarging, then quickly shrinks to nothing */
+.fx-ghost.fx-curse {
+    animation-name: fx-curse-scale;
+}
+
+.fx-ghost.fx-curse .fx-body {
+    /* no backwards fill: cells waiting their turn in a chain must not be tilted */
+    animation: fx-curse-shake 90ms linear var(--fx-delay, 0ms) infinite alternate forwards;
+}
+
+@keyframes fx-curse-scale {
+    0%   { transform: scale(1);   opacity: 1; animation-timing-function: ease-in; }
+    80%  { transform: scale(1.4); opacity: 1; animation-timing-function: cubic-bezier(0.6, 0, 1, 0.6); }
+    100% { transform: scale(0);   opacity: 0; }
+}
+
+@keyframes fx-curse-shake {
+    0%   { transform: translate(-2px, 1px) rotate(-3deg); }
+    50%  { transform: translate(1px, -2px) rotate(2deg); }
+    100% { transform: translate(2px, 1px) rotate(3deg); }
+}
+
+/* RAGE: slowly turns red, then enlarges quickly while fading. No shrink. */
+.fx-ghost.fx-rage {
+    animation-name: fx-rage-scale;
+}
+
+.fx-ghost.fx-rage .fx-body {
+    animation: fx-rage-color var(--fx-dur, 850ms) linear var(--fx-delay, 0ms) both;
+}
+
+@keyframes fx-rage-scale {
+    0%   { transform: scale(1);    opacity: 1; }
+    70%  { transform: scale(1.04); opacity: 1; animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+    100% { transform: scale(1.9);  opacity: 0; }
+}
+
+@keyframes fx-rage-color {
+    0%   { background: var(--fx-from); border-color: var(--fx-from); box-shadow: 0 0 0 transparent; }
+    70%  { background: var(--red);     border-color: var(--red-light); box-shadow: 0 0 14px var(--red); }
+    100% { background: var(--red);     border-color: var(--red-light); box-shadow: 0 0 22px var(--red); }
+}
+
+/* STATUS (poison): the chosen cell slowly loses opacity */
+.fx-ghost.fx-fade {
+    animation-name: fx-fade;
+    animation-timing-function: ease-in-out;
+}
+
+@keyframes fx-fade {
+    0%   { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+/* RETALIATE: quick enlarge, then it slams back down turning yellow */
+.fx-ghost.fx-thump {
+    animation-name: fx-thump-scale;
+}
+
+.fx-ghost.fx-thump .fx-body {
+    animation: fx-thump-color var(--fx-dur, 650ms) linear var(--fx-delay, 0ms) both;
+}
+
+@keyframes fx-thump-scale {
+    0%   { transform: scale(1);   opacity: 1; animation-timing-function: cubic-bezier(0.12, 0.9, 0.3, 1); }
+    28%  { transform: scale(1.5); opacity: 1; animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.4); }
+    88%  { transform: scale(1);   opacity: 1; animation-timing-function: linear; }
+    100% { transform: scale(1);   opacity: 0; }
+}
+
+@keyframes fx-thump-color {
+    0%, 28%   { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 transparent; }
+    88%, 100% { background: #e2bd24;      border-color: #e2bd24;      box-shadow: 0 0 10px rgba(226, 189, 36, 0.6); }
+}
+
+/* HEAL: quick pop of the cell itself (green for HP, blue for Overheal) */
+.grid-cell.fx-popin {
+    z-index: 5;
+    animation: fx-popin var(--fx-dur, 380ms) cubic-bezier(0.2, 0.8, 0.3, 1.2) var(--fx-delay, 0ms) backwards;
+}
+
+.grid-cell.fx-popin-hp       { --fx-glow: rgba(122, 221, 196, 0.9); }
+.grid-cell.fx-popin-overheal { --fx-glow: rgba(57, 134, 214, 0.9); }
+
+@keyframes fx-popin {
+    0%   { transform: scale(0.35); opacity: 0.4; box-shadow: 0 0 0 0 var(--fx-glow); }
+    55%  { transform: scale(1.3);  opacity: 1;   box-shadow: 0 0 16px 5px var(--fx-glow); }
+    100% { transform: scale(1);    opacity: 1;   box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .grid-cell > .fx-ghost,
+    .grid-cell.fx-popin {
+        display: none;
+        animation: none;
+    }
+}

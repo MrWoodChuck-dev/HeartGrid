@@ -411,11 +411,17 @@
                             <div id="energy-display" class="energy-display" hidden>
                                 <div class="energy-heading">
                                     <span>YOUR ENERGY</span>
-                                    <strong id="energy-value">0 / 9</strong>
+                                    <strong class="energy-readout">
+                                        <span id="energy-value-icons" class="energy-icons"></span>
+                                        <span id="energy-value">0 / 9</span>
+                                    </strong>
                                 </div>
 
-                                <div class="energy-track">
-                                    <div id="energy-bar" class="energy-fill"></div>
+                                <div class="energy-bar-row">
+                                    <span id="energy-bar-icons" class="energy-icons"></span>
+                                    <div class="energy-track">
+                                        <div id="energy-bar" class="energy-fill"></div>
+                                    </div>
                                 </div>
 
                                 <p class="energy-description">
@@ -494,10 +500,9 @@
                             <h2>COMBAT CARDS</h2>
 
                             <p class="section-description">
-                                Select a card to enter targeting mode. Attack cards
-                                target the monster. Heal cards target yourself or
-                                a teammate. Hover to preview the pattern, then click
-                                to confirm.
+                                Hover a card to read what it does. Drag a card into
+                                the Active Area to play it. Once you let go, the
+                                action is locked in and cannot be cancelled.
                             </p>
 
                             <div id="heal-target-container" hidden>
@@ -551,7 +556,7 @@
     const endMonsterTurnButton =
         document.getElementById("end-monster-turn");
 
-    function renderInitiativeList(element, order, currentTurn) {
+    function renderInitiativeList(element, order, currentTurn, encounter) {
         if (!element) return;
 
         element.innerHTML = "";
@@ -568,7 +573,7 @@
             const item = document.createElement("div");
             item.className = "initiative-player";
 
-            if (currentTurn?.id === participant.id) {
+            if (!currentTurn?.counter && currentTurn?.id === participant.id) {
                 item.classList.add("active-turn");
             }
 
@@ -589,8 +594,33 @@
 
             details.append(name, role);
             item.append(number, details);
-
             element.appendChild(item);
+
+            // Counter is a bonus turn immediately after the Monster's turn.
+            if (participant.type === "monster") {
+                (encounter?.counterPlayers || []).forEach(counter => {
+                    const count = (counter.counterTurns || 0) + (counter.active ? 1 : 0);
+                    if (count <= 0) return;
+
+                    const bonus = document.createElement("div");
+                    bonus.className = "initiative-player counter-initiative";
+                    if (counter.active) bonus.classList.add("active-turn");
+
+                    const bonusNumber = document.createElement("strong");
+                    bonusNumber.className = "initiative-number";
+                    bonusNumber.textContent = "↳";
+
+                    const bonusDetails = document.createElement("div");
+                    bonusDetails.className = "initiative-details";
+                    const bonusName = document.createElement("strong");
+                    bonusName.textContent = `${counter.username} — COUNTER BONUS`;
+                    const bonusRole = document.createElement("span");
+                    bonusRole.textContent = `${count} bonus turn(s)`;
+                    bonusDetails.append(bonusName, bonusRole);
+                    bonus.append(bonusNumber, bonusDetails);
+                    element.appendChild(bonus);
+                });
+            }
         });
     }
 
@@ -602,23 +632,30 @@
         renderInitiativeList(
             initiativeElements.host.list,
             order,
-            turn
+            turn,
+            encounter
         );
 
         renderInitiativeList(
             initiativeElements.player.list,
             order,
-            turn
+            turn,
+            encounter
         );
 
         const currentText = active && turn
-            ? `CURRENT TURN: ${turn.username}`
+            ? `CURRENT TURN: ${turn.username}${turn.counter ? " — COUNTER BONUS TURN" : ""}`
             : active
                 ? "Waiting for a turn..."
                 : "Waiting for encounter...";
 
         initiativeElements.host.current.textContent = currentText;
         initiativeElements.player.current.textContent = currentText;
+
+        const hostWeakenStatus = document.getElementById("monster-attack-message");
+        if (currentRole === "host" && hostWeakenStatus && (encounter?.weaken || 0) > 0 && monsterAttackRoll === null) {
+            hostWeakenStatus.textContent = `WEAKEN ACTIVE: ${encounter.weaken} monster attack position(s) will be negated on its next roll.`;
+        }
 
         const isMyTurn =
             currentRole === "player" &&
@@ -637,16 +674,25 @@
 
         energyDisplay.hidden = !active || currentRole !== "player";
 
+        if (!active) displayedEnergy = 0;
+
+        renderEnergyDisplay();
+    }
+
+    /* Energy readout: yellow bar + number, with the Energy icon on the left
+       of both. Past 9 Energy (overflow) the icon becomes a stack of three. */
+    function renderEnergyDisplay() {
+        const overflow = displayedEnergy > 9;
+
         energyValue.textContent = `${displayedEnergy} / 9`;
 
         energyBar.style.width =
             `${Math.max(0, Math.min(100, displayedEnergy / 9 * 100))}%`;
 
-        if (!active) {
-            displayedEnergy = 0;
-            energyValue.textContent = "0 / 9";
-            energyBar.style.width = "0%";
-        }
+        energyDisplay.classList.toggle("is-overflow", overflow);
+
+        setEnergyIcons(document.getElementById("energy-value-icons"), overflow);
+        setEnergyIcons(document.getElementById("energy-bar-icons"), overflow);
     }
 
     /* RECEIVE ENERGY FROM SERVER */
