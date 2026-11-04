@@ -168,14 +168,14 @@
                     <p id="monster-encounter-message" class="status-message"></p>
                 </div>
 
-                <!-- HOST COMBAT ORDER -->
+                <!-- BATTLEFIELD MANAGEMENT (combat order + party + monster attack) -->
                 <div class="host-section turn-system" id="host-turn-system">
                     <div class="turn-system-header">
                         <div>
                             <p class="interface-label">BATTLE MANAGEMENT</p>
-                            <h2>COMBAT ORDER</h2>
+                            <h2>BATTLEFIELD MANAGEMENT</h2>
                         </div>
-                        <span class="turn-round-label">INITIATIVE</span>
+                        <span class="turn-round-label">COMBAT ORDER</span>
                     </div>
 
                     <p id="host-turn-current" class="turn-current">
@@ -186,11 +186,21 @@
                         <p class="empty-message">Initiative will appear when combat starts.</p>
                     </div>
 
+                    <!-- Monster, D10 and the party, built by host-battle.js -->
+                    <div id="host-battlefield" class="hb-scene"></div>
+
+                    <p id="hb-banner" class="taunt-banner" hidden></p>
+                    <p id="hb-message" class="status-message"></p>
+
                     <button id="end-monster-turn" class="primary-button" hidden>
                         END MONSTER TURN
                     </button>
                 </div>
 
+                <!-- The original attack controls and party grids. They are no longer
+                     shown, but they still hold the attack rules (roll, taunt, weaken,
+                     position limits) that the Battlefield Management panel drives. -->
+                <div id="host-engine" hidden>
                 <!-- MONSTER ATTACK -->
                 <div class="host-section" id="monster-attack-section">
                     <h2>MONSTER ATTACK</h2>
@@ -238,6 +248,8 @@
                     <div id="host-party-grids">
                         <p class="empty-message">Waiting for players.</p>
                     </div>
+                </div>
+
                 </div>
 
             </div>
@@ -435,8 +447,25 @@
 
                         </div>
 
-                        <!-- COMBAT ARENA -->
-                        <div class="combat-arena">
+                        <!-- BATTLEFIELD: hover (or tap) a combatant for details -->
+                        <section id="battlefield" class="battlefield" aria-label="Battlefield">
+                            <h2 class="battlefield-title">BATTLEFIELD</h2>
+
+                            <div class="bf-scene">
+                                <div class="bf-monster-side"></div>
+                                <div class="bf-formation"></div>
+                            </div>
+
+                            <p class="bf-hint">
+                                Hover a portrait (tap on touch screens) to see the
+                                monster's grid and effects, or a player's Energy,
+                                grid and cards.
+                            </p>
+                        </section>
+
+                        <!-- COMBAT ARENA (kept in sync for the rest of the game, but
+                             hidden: the battlefield above replaces it) -->
+                        <div class="combat-arena legacy-arena" aria-hidden="true">
 
                             <section class="combat-monster-panel">
                                 <h2>MONSTER</h2>
@@ -530,6 +559,11 @@
 <!-- LOAD SOCKET.IO AND THE MAIN GAME SCRIPT -->
 <script src="/socket.io/socket.io.js"></script>
 <script src="script.js"></script>
+
+<!-- ACTION STAGE (card -> explosion -> grid animation) AND BATTLEFIELD -->
+<script src="stage.js"></script>
+<script src="battlefield.js"></script>
+<script src="host-battle.js"></script>
 
 <!-- ENERGY AND INITIATIVE INTERFACE -->
 <script>

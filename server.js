@@ -130,8 +130,9 @@ function regeneratePlayerEnergy(player) {
     }
 }
 
-// Retaliate marks are secret from the Host, so they are only included
-// when the state is sent to a player.
+// Retaliate marks, Energy and the cards a player is holding are all secret
+// from the Host, so they are only included when the state is sent to a player.
+// Teammates can look at them on the battlefield; the Host cannot.
 function getPublicPlayer(player, includeMarks = false) {
     const publicPlayer = {
         id: player.id,
@@ -141,7 +142,6 @@ function getPublicPlayer(player, includeMarks = false) {
         grid: [...player.grid],
         cardCount: player.cards.length,
         hasAssignment: Boolean(player.assignment),
-        energy: player.energy ?? 0,
         counterTurns: player.counterTurns ?? 0,
         status: player.status
             ? { ...player.status }
@@ -149,7 +149,19 @@ function getPublicPlayer(player, includeMarks = false) {
     };
 
     if (includeMarks) {
+        // Energy is private too: a Host who can watch it could work out
+        // that a Retaliate was played (Energy spent, nothing visible happened).
+        publicPlayer.energy = player.energy ?? 0;
+
         publicPlayer.marks = [...(player.marks || [])];
+
+        publicPlayer.cards = player.cards.map(card => ({
+            id: card.id,
+            name: card.name,
+            type: card.type,
+            targetCount: card.targetCount,
+            pattern: [...(card.pattern || [])]
+        }));
     }
 
     return publicPlayer;
@@ -329,7 +341,14 @@ function emitToPlayersAndHost(room, eventName, fullData, hostData) {
         io.to(player.id).emit(eventName, fullData);
     }
 
-    io.to(room.host).emit(eventName, hostData ?? fullData);
+    // Unless told otherwise, the Host gets the same result without anyone's
+    // Energy figures (see getPublicPlayer for why).
+    if (hostData === undefined) {
+        const { energySpent, remainingEnergy, ...publicData } = fullData;
+        hostData = publicData;
+    }
+
+    io.to(room.host).emit(eventName, hostData);
 }
 
 /* =====================================
@@ -1325,7 +1344,7 @@ io.on("connection", socket => {
             remainingTurns: duration
         };
 
-        io.to(roomID).emit("player-status-resolved", {
+        emitToPlayersAndHost(room, "player-status-resolved", {
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -2021,7 +2040,7 @@ io.on("connection", socket => {
 
         player.energy -= card.targetCount;
 
-        io.to(roomID).emit("player-attack-resolved", {
+        emitToPlayersAndHost(room, "player-attack-resolved", {
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -2119,7 +2138,7 @@ io.on("connection", socket => {
             player.grid[position] = "hp";
         });
 
-        io.to(roomID).emit("player-lifesteal-resolved", {
+        emitToPlayersAndHost(room, "player-lifesteal-resolved", {
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -2218,7 +2237,7 @@ io.on("connection", socket => {
 
         player.energy -= cost;
 
-        io.to(roomID).emit("player-curse-resolved", {
+        emitToPlayersAndHost(room, "player-curse-resolved", {
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -2346,7 +2365,7 @@ io.on("connection", socket => {
 
         player.energy -= card.targetCount;
 
-        io.to(roomID).emit("player-heal-resolved", {
+        emitToPlayersAndHost(room, "player-heal-resolved", {
             playerID: player.id,
             username: player.username,
             targetPlayerID: target.id,
@@ -2434,7 +2453,7 @@ io.on("connection", socket => {
         player.energy -= card.targetCount;
         target.energy += card.targetCount;
 
-        io.to(roomID).emit("player-buff-resolved", {
+        emitToPlayersAndHost(room, "player-buff-resolved", {
             playerID: player.id,
             username: player.username,
             targetPlayerID: target.id,
@@ -2500,7 +2519,7 @@ io.on("connection", socket => {
         // Each Weaken point negates one monster attack position on its next roll.
         room.weaken = (room.weaken || 0) + card.targetCount;
 
-        io.to(roomID).emit("player-weaken-resolved", {
+        emitToPlayersAndHost(room, "player-weaken-resolved", {
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -2606,7 +2625,7 @@ io.on("connection", socket => {
 
         player.energy += energyGained;
 
-        io.to(roomID).emit("player-rage-resolved", {
+        emitToPlayersAndHost(room, "player-rage-resolved", {
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -2678,7 +2697,7 @@ io.on("connection", socket => {
         // Each position is one Counter Turn. Counter stacks.
         player.counterTurns = (player.counterTurns || 0) + card.targetCount;
 
-        io.to(roomID).emit("player-counter-resolved", {
+        emitToPlayersAndHost(room, "player-counter-resolved", {
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -2757,7 +2776,7 @@ io.on("connection", socket => {
             };
         }
 
-        io.to(roomID).emit("player-taunt-resolved", {
+        emitToPlayersAndHost(room, "player-taunt-resolved", {
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -2866,12 +2885,11 @@ io.on("connection", socket => {
                 remainingEnergy: player.energy
             },
             {
+                // The Host's copy: no positions and no Energy figures.
                 playerID: player.id,
                 username: player.username,
                 cardName: card.name,
-                marked: positions.length,
-                energySpent: cost,
-                remainingEnergy: player.energy
+                marked: positions.length
             }
         );
 

@@ -2217,3 +2217,1136 @@ body.play-overlay-open {
         animation: none;
     }
 }
+
+
+/* =====================================
+   ACTION STAGE  (stage.js)
+===================================== */
+
+body.stage-open {
+    overflow: hidden;
+}
+
+.stage-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9800;
+    display: flex;
+    flex-direction: column;
+    padding:
+        max(14px, env(safe-area-inset-top))
+        18px
+        max(14px, env(safe-area-inset-bottom));
+    background: #0c0d10;
+    color: #f2efe6;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    animation: stage-fade-in 0.2s ease-out both;
+}
+
+.stage-overlay.is-closing {
+    pointer-events: none;
+    animation: stage-fade-out 0.2s ease-in both;
+}
+
+@keyframes stage-fade-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes stage-fade-out { from { opacity: 1; } to { opacity: 0; } }
+
+.stage-top,
+.stage-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 34px;
+}
+
+.stage-actor {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 2px;
+}
+
+.stage-queue {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    opacity: 0.6;
+}
+
+.stage-hint {
+    font-size: 10px;
+    letter-spacing: 2px;
+    opacity: 0.5;
+    animation: promptBlink 2.4s ease-in-out infinite;
+}
+
+.stage-skip-all {
+    padding: 8px 14px;
+    border: 1px solid rgba(242, 239, 230, 0.4);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+}
+
+.stage-skip-all:hover {
+    background: rgba(242, 239, 230, 0.12);
+}
+
+.stage-center {
+    position: relative;
+    display: grid;
+    flex: 1;
+    min-height: 0;
+    place-items: center;
+}
+
+
+/* ----- The card ----- */
+
+.stage-card-wrap {
+    position: relative;
+    width: min(250px, 64vw);
+}
+
+.stage-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    min-height: 330px;
+    padding: 14px 14px 16px;
+    overflow: hidden;
+    border: 3px solid var(--card-color, #666);
+    border-radius: 16px;
+    background: #1b1d22;
+    box-shadow: 0 0 28px -4px var(--card-color, #666);
+    text-align: center;
+}
+
+.stage-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--card-color, #666);
+    opacity: 0.16;
+    pointer-events: none;
+}
+
+.stage-card > * {
+    position: relative;
+}
+
+.stage-card-kicker {
+    align-self: stretch;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--card-color, #666);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 2px;
+}
+
+.stage-card-art {
+    display: grid;
+    flex: 1;
+    place-items: center;
+    width: 100%;
+    min-height: 120px;
+}
+
+.stage-card-art img {
+    display: block;
+    width: 62%;
+    max-height: 150px;
+    object-fit: contain;
+    pointer-events: none;
+}
+
+.stage-card-name {
+    margin: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-size: 19px;
+    line-height: 1.2;
+}
+
+.stage-card-line {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    opacity: 0.85;
+}
+
+/* "3 -> 2" turn readout (Counter, poison) */
+.stage-counter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.stage-counter-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 44px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.stage-counter-from {
+    opacity: 0.45;
+    text-decoration: line-through;
+    animation: stage-counter-from 0.6s ease 0.35s both;
+}
+
+.stage-counter-arrow {
+    font-size: 26px;
+    opacity: 0.6;
+}
+
+.stage-counter-to {
+    color: var(--card-color, #fff);
+    filter: brightness(1.5);
+    animation: stage-counter-to 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.5) 0.5s both;
+}
+
+.stage-counter-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    opacity: 0.7;
+}
+
+@keyframes stage-counter-from {
+    from { transform: none; opacity: 0.9; }
+    to   { transform: scale(0.8); opacity: 0.45; }
+}
+
+@keyframes stage-counter-to {
+    from { transform: scale(2.2); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+}
+
+/* pop in -> charge up (shake) -> burst. The order matters: later rules win. */
+.stage-card-wrap.is-entering {
+    animation: stage-card-in 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+}
+
+.stage-card-wrap.is-charging {
+    animation: stage-card-charge var(--charge-ms, 1000ms) ease-in forwards;
+}
+
+.stage-card-wrap.is-holding {
+    animation: stage-card-hold 1.4s ease-in-out infinite;
+}
+
+.stage-card-wrap.is-bursting {
+    animation: stage-card-burst 0.54s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+.stage-card.is-shaking {
+    animation: stage-card-jitter 70ms linear infinite alternate;
+}
+
+@keyframes stage-card-in {
+    from { transform: scale(0.3) rotate(-8deg); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+}
+
+@keyframes stage-card-charge {
+    from { transform: scale(1);    filter: brightness(1); }
+    to   { transform: scale(1.14); filter: brightness(1.45); }
+}
+
+@keyframes stage-card-hold {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.03); }
+}
+
+@keyframes stage-card-burst {
+    0%   { transform: scale(1.14); opacity: 1; filter: brightness(2.2); }
+    100% { transform: scale(1.7);  opacity: 0; filter: brightness(3); }
+}
+
+@keyframes stage-card-jitter {
+    from { transform: translate(-3px, 1px) rotate(-2.2deg); }
+    to   { transform: translate(3px, -1px) rotate(2.2deg); }
+}
+
+/* the explosion itself */
+.stage-burst {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+
+.stage-flash {
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    margin: -150px 0 0 -150px;
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        #fff 0%,
+        var(--card-color, #fff) 35%,
+        transparent 70%
+    );
+    animation: stage-flash 0.44s ease-out both;
+}
+
+.stage-spark {
+    position: absolute;
+    width: var(--size, 8px);
+    height: var(--size, 8px);
+    margin: calc(var(--size, 8px) / -2) 0 0 calc(var(--size, 8px) / -2);
+    border-radius: 50%;
+    background: var(--card-color, #fff);
+    box-shadow: 0 0 10px var(--card-color, #fff);
+    animation: stage-spark 0.54s ease-out both;
+}
+
+@keyframes stage-flash {
+    from { transform: scale(0.2); opacity: 0.95; }
+    to   { transform: scale(1.5); opacity: 0; }
+}
+
+@keyframes stage-spark {
+    from { transform: translate(0, 0) scale(1);                    opacity: 1; }
+    to   { transform: translate(var(--dx), var(--dy)) scale(0.2);  opacity: 0; }
+}
+
+
+/* ----- The grid ----- */
+
+.stage-grid-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+
+.stage-grid-panel.is-entering {
+    animation: stage-panel-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+}
+
+@keyframes stage-panel-in {
+    from { transform: scale(0.85); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+}
+
+.stage-grid-title {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-align: center;
+    opacity: 0.8;
+}
+
+.stage-grid.heart-grid {
+    width: min(88vw, calc(100dvh - 230px), 560px);
+    min-width: 220px;
+    margin: 0;
+    padding: 14px;
+    border-radius: 16px;
+    background: #2d3036;
+    gap: 7px;
+}
+
+.stage-grid .grid-cell.empty {
+    background: #1b1d21;
+    border-color: #3a3d44;
+}
+
+/* A freshly cursed cell pops in purple */
+.grid-cell.fx-popin-curse {
+    --fx-glow: rgba(155, 99, 210, 0.9);
+}
+
+@media (max-width: 520px) {
+    .stage-overlay {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+
+    .stage-card {
+        min-height: 300px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .stage-overlay {
+        display: none !important;
+    }
+}
+
+
+/* =====================================
+   BATTLEFIELD  (battlefield.js)
+===================================== */
+
+/* The old arena panels are still kept up to date (the rest of the game talks
+   to them) but the battlefield is what you look at now. */
+.combat-arena.legacy-arena {
+    display: none;
+}
+
+.battlefield {
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.battlefield-title {
+    margin: 0 0 12px;
+    font-size: 13px;
+    letter-spacing: 1.5px;
+}
+
+.bf-scene {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(96px, 26%) minmax(0, 1fr);
+    gap: 12px;
+    min-height: clamp(330px, 48vw, 460px);
+    padding: 16px;
+    overflow: hidden;
+    border-radius: 10px;
+    background:
+        radial-gradient(ellipse at 22% 78%, rgba(0, 0, 0, 0.1), transparent 55%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(0, 0, 0, 0.06));
+}
+
+.bf-monster-side {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.bf-formation {
+    position: relative;
+    min-width: 0;
+}
+
+/* Tokens share one look; the slot decides where they stand. */
+.bf-slot {
+    position: absolute;
+    top: var(--y);
+    left: var(--x);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    width: max-content;
+    transform: translate(-50%, -50%);
+}
+
+.bf-token {
+    --token-size: clamp(60px, 11vw, 112px);
+
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: var(--token-size);
+    height: var(--token-size);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.bf-token img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    -webkit-user-drag: none;
+    filter: drop-shadow(0 6px 5px rgba(0, 0, 0, 0.35));
+}
+
+.bf-token:hover,
+.bf-token:focus-visible,
+.bf-slot.is-open .bf-token {
+    transform: scale(1.1);
+    outline: none;
+}
+
+.bf-monster-side .bf-token {
+    --token-size: clamp(84px, 15vw, 170px);
+}
+
+.bf-name {
+    max-width: 120px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The name only shows while the portrait is not being hovered. */
+.bf-slot.is-open .bf-name,
+.bf-monster-side.is-open .bf-name {
+    visibility: hidden;
+}
+
+.bf-you {
+    margin-left: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--ink);
+    color: var(--surface);
+    font-size: 8px;
+    letter-spacing: 1px;
+    vertical-align: 1px;
+}
+
+/* Whose turn it is */
+.bf-token::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border: 3px solid transparent;
+    border-radius: 50%;
+    pointer-events: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.is-active-turn > .bf-token::after,
+.bf-monster-side.is-active-turn .bf-token::after {
+    border-color: var(--green);
+    box-shadow: 0 0 14px rgba(67, 166, 107, 0.7);
+}
+
+.bf-monster-side.is-active-turn .bf-token::after {
+    border-color: var(--red);
+    box-shadow: 0 0 14px rgba(217, 72, 72, 0.7);
+}
+
+.bf-slot.is-dead .bf-token img {
+    filter: grayscale(1) brightness(0.7);
+    opacity: 0.6;
+}
+
+.bf-monster-side.is-empty .bf-token {
+    opacity: 0.35;
+    cursor: default;
+}
+
+/* The Tank stands at the front, leaning into the Monster with a guard arc. */
+.bf-slot[data-class="Tank"] .bf-token img {
+    transform: translateX(-6px) rotate(-8deg);
+}
+
+.bf-slot[data-class="Tank"] .bf-token::before {
+    content: "";
+    position: absolute;
+    top: 6%;
+    bottom: 6%;
+    left: -12px;
+    width: 16px;
+    border-left: 6px solid var(--green);
+    border-radius: 60% 0 0 60% / 50% 0 0 50%;
+    opacity: 0.85;
+    pointer-events: none;
+}
+
+/* Formation, seen from the Monster's side (front = left):
+        Tank in front, Warrior beside him, Support in the middle,
+        Mage and Thief behind the Support. */
+.bf-slot[data-class="Tank"]    { --x: 9%;  --y: 36%; }
+.bf-slot[data-class="Warrior"] { --x: 25%; --y: 74%; }
+.bf-slot[data-class="Support"] { --x: 52%; --y: 48%; }
+.bf-slot[data-class="Mage"]    { --x: 82%; --y: 22%; }
+.bf-slot[data-class="Thief"]   { --x: 82%; --y: 74%; }
+
+.bf-hint {
+    margin: 10px 0 0;
+    font-size: 10px;
+    letter-spacing: 1px;
+    opacity: 0.55;
+}
+
+
+/* ----- Hover panel ----- */
+
+.bf-popover {
+    position: fixed;
+    z-index: 8500;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: min(340px, calc(100vw - 20px));
+    max-height: calc(100dvh - 20px);
+    padding: 14px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.3);
+    animation: bf-popover-in 0.12s ease-out both;
+}
+
+@keyframes bf-popover-in {
+    from { opacity: 0; transform: scale(0.96); }
+    to   { opacity: 1; transform: none; }
+}
+
+.bf-popover-title {
+    margin: 0;
+    font-size: 15px;
+}
+
+.bf-popover-label {
+    margin: 0 0 6px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    opacity: 0.6;
+}
+
+/* energy, on top */
+.bf-energy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.bf-energy-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+}
+
+.bf-energy-head strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bf-energy-readout {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #268b51;
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.bf-energy .energy-track {
+    margin-top: 0;
+}
+
+.bf-energy.is-overflow .energy-fill {
+    background: #d49a1a;
+}
+
+/* grid, in the center */
+.bf-popover .heart-grid {
+    width: min(100%, 250px);
+    margin: 0 auto;
+    gap: 5px;
+}
+
+/* cards, at the bottom */
+.bf-cards {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+.bf-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 84px;
+}
+
+.bf-card-face {
+    width: 84px;
+    height: 84px;
+}
+
+.bf-card-face .compact-card-face {
+    transform: scale(0.667);
+    transform-origin: top left;
+}
+
+.bf-card-name {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bf-empty {
+    margin: 0;
+    font-size: 11px;
+    opacity: 0.55;
+    text-align: center;
+}
+
+/* monster effects */
+.bf-effects {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.bf-effect {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 4px 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background: rgba(128, 128, 128, 0.06);
+}
+
+.bf-effect img {
+    width: 30px;
+    height: 30px;
+    object-fit: contain;
+}
+
+.bf-effect strong {
+    font-size: 17px;
+    line-height: 1;
+}
+
+@media (max-width: 520px) {
+    .battlefield {
+        padding: 12px;
+    }
+
+    .bf-scene {
+        padding: 10px;
+        gap: 6px;
+    }
+}
+
+
+/* =====================================
+   HOST: BATTLEFIELD MANAGEMENT  (host-battle.js)
+===================================== */
+
+.hb-scene {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px 28px;
+    margin-top: 18px;
+    padding: 16px 18px;
+    border-radius: 10px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(0, 0, 0, 0.06));
+}
+
+.hb-monster {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.hb-party {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 14px;
+}
+
+.hb-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.hb-token {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: clamp(54px, 9vw, 76px);
+    height: clamp(54px, 9vw, 76px);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+
+.hb-monster-token {
+    width: clamp(64px, 11vw, 96px);
+    height: clamp(64px, 11vw, 96px);
+}
+
+.hb-token img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    -webkit-user-drag: none;
+    filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.3));
+}
+
+.hb-token:hover,
+.hb-token:focus-visible,
+.hb-slot.is-open .hb-token {
+    transform: scale(1.1);
+    outline: none;
+}
+
+.hb-name {
+    max-width: 90px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* names step aside while the panel is open */
+.hb-slot.is-open .hb-name {
+    visibility: hidden;
+}
+
+/* whose turn it is */
+.hb-token::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border: 3px solid transparent;
+    border-radius: 50%;
+    pointer-events: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hb-slot.is-active-turn .hb-token::after {
+    border-color: var(--green);
+    box-shadow: 0 0 12px rgba(67, 166, 107, 0.7);
+}
+
+.hb-monster.is-active-turn .hb-token::after {
+    border-color: var(--red);
+    box-shadow: 0 0 12px rgba(217, 72, 72, 0.7);
+}
+
+.hb-slot.is-dead .hb-token img {
+    filter: grayscale(1) brightness(0.7);
+    opacity: 0.6;
+}
+
+.hb-monster.is-empty .hb-token {
+    opacity: 0.35;
+    cursor: default;
+}
+
+/* D10 */
+.hb-dice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 78px;
+    padding: 8px 12px;
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.4);
+}
+
+.hb-dice.has-roll {
+    border-color: var(--red);
+    background: rgba(217, 72, 72, 0.12);
+}
+
+.hb-dice-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    opacity: 0.6;
+}
+
+.hb-dice-value {
+    font-size: 34px;
+    line-height: 1;
+}
+
+.hb-roll {
+    padding: 6px 14px;
+    border: 0;
+    border-radius: 6px;
+    background: #333;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+}
+
+.hb-roll:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* Once the D10 is rolled the party shakes: pick who the monster hits. */
+.hb-slot.is-selecting .hb-token {
+    animation: hb-shake 0.45s ease-in-out infinite;
+}
+
+.hb-slot.is-selecting .hb-token::after {
+    border-color: var(--red);
+    box-shadow: 0 0 14px rgba(217, 72, 72, 0.75);
+}
+
+.hb-slot.is-selecting .hb-token:hover,
+.hb-slot.is-selecting .hb-token:focus-visible {
+    animation: none;
+    transform: scale(1.14);
+}
+
+/* alive but Taunt says no */
+.hb-slot.is-locked .hb-token {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+@keyframes hb-shake {
+    0%, 100% { transform: translateX(0) rotate(0); }
+    20%      { transform: translateX(-3px) rotate(-4deg); }
+    40%      { transform: translateX(3px) rotate(4deg); }
+    60%      { transform: translateX(-2px) rotate(-3deg); }
+    80%      { transform: translateX(2px) rotate(3deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hb-slot.is-selecting .hb-token {
+        animation: none;
+    }
+}
+
+#hb-banner {
+    margin-top: 14px;
+}
+
+#hb-message {
+    min-height: 1.4em;
+    margin: 12px 0 0;
+}
+
+/* hover panel */
+.hb-popover {
+    position: fixed;
+    z-index: 8500;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(260px, calc(100vw - 20px));
+    max-height: calc(100dvh - 20px);
+    padding: 12px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.3);
+    animation: bf-popover-in 0.12s ease-out both;
+}
+
+.hb-popover-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13px;
+}
+
+.hb-hp {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #268b51;
+    white-space: nowrap;
+}
+
+.hb-popover .heart-grid {
+    width: min(100%, 220px);
+    margin: 0 auto;
+    gap: 4px;
+}
+
+.hb-cards {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-align: center;
+    opacity: 0.65;
+}
+
+.hb-popover .revive-button {
+    margin: 0 auto;
+}
+
+
+/* ----- Attack screen ----- */
+
+.ha-face img {
+    display: block;
+    width: 84px;
+    height: 84px;
+    object-fit: contain;
+}
+
+.ha-overlay {
+    --card-color: #d94848;
+}
+
+.ha-overlay .play-overlay-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+.ha-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 76px;
+    padding: 8px 12px;
+    border: 2px solid #d94848;
+    border-radius: 10px;
+    background: rgba(217, 72, 72, 0.14);
+}
+
+.ha-left span {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    opacity: 0.8;
+}
+
+.ha-left-value {
+    font-size: 32px;
+    line-height: 1;
+}
+
+.ha-close {
+    align-self: flex-start;
+    padding: 8px 14px;
+    border: 1px solid rgba(242, 239, 230, 0.4);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+}
+
+.ha-close:hover {
+    background: rgba(242, 239, 230, 0.12);
+}
+
+/* icons are the selection */
+.ha-chip {
+    align-items: center;
+    min-width: 104px;
+    padding: 8px 14px 10px;
+}
+
+.ha-chip img {
+    display: block;
+    width: 52px;
+    height: 52px;
+    object-fit: contain;
+}
+
+.ha-chip small {
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ha-chip.selected {
+    border-color: #ff7777;
+    background: #3d2a2c;
+}
+
+.ha-overlay .play-overlay-stage.is-empty {
+    background: #1b1d21;
+}
+
+.ha-grid .grid-cell.is-blocked {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.ha-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+.ha-count {
+    flex: 1;
+    min-width: 120px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.ha-actions .primary-button {
+    margin: 0;
+}
+
+.ha-actions .primary-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+@media (max-width: 520px) {
+    .hb-scene {
+        justify-content: center;
+    }
+
+    .hb-party {
+        justify-content: center;
+    }
+}
