@@ -107,9 +107,11 @@
         );
     }
 
-    // Under Taunt only the Tank can be chosen.
+    // Under Taunt only the Tank can be chosen. A Shielded player can never be.
     function canTarget(player) {
         if (!isMonsterTurn() || !hasRoll() || isDeadPlayer(player)) return false;
+
+        if (player.shielded) return false;
 
         const tank = getActiveTauntTank();
 
@@ -625,9 +627,11 @@
                 chip.type = "button";
                 chip.classList.toggle("selected", target?.id === player.id);
                 chip.disabled = !canTarget(player);
-                chip.title = getActiveTauntTank() && chip.disabled
-                    ? "Taunted: the monster must hit the Tank"
-                    : player.username;
+                chip.title = player.shielded
+                    ? "Shielded: the monster can't target this player"
+                    : getActiveTauntTank() && chip.disabled
+                        ? "Taunted: the monster must hit the Tank"
+                        : player.username;
 
                 chip.append(iconFor(player.className), el("small", "", player.username));
 

@@ -136,6 +136,9 @@
         image.draggable = false;
         token.appendChild(image);
 
+        // Shield: a light-blue bubble around the portrait (see style.css).
+        token.appendChild(el("span", "bf-bubble"));
+
         const name = el("span", "bf-name");
 
         slot.append(token, name);
@@ -183,6 +186,10 @@
             );
 
             entry.slot.classList.toggle("is-dead", isDead(player));
+            entry.slot.classList.toggle(
+                "is-shielded",
+                Boolean(currentEncounter?.shield?.targetID === player.id)
+            );
             entry.slot.classList.toggle(
                 "is-active-turn",
                 Boolean(turn && turn.type === "player" && turn.id === player.id)
@@ -412,7 +419,7 @@
 
         const readout = el("span", "bf-energy-readout");
         readout.append(
-            createEnergyIcon(),
+            createEnergyIcon(energyValue < 0),
             document.createTextNode(`${formatEnergy(energyValue)} / ${MAX_ENERGY}`)
         );
         head.appendChild(readout);
@@ -512,6 +519,60 @@
             });
         }
     );
+
+    /*
+        Shield: the camera pushes in on the protected player, the bubble
+        pops up around them (it stays while the Shield lasts), then the
+        camera eases back out.
+    */
+    socket.on("player-shield-resolved", result => {
+        if (currentRole !== "player") return;
+        if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+        const target = getPlayerByID(result.targetPlayerID);
+        const entry = target ? slots.get(target.className) : null;
+        const scene = root.querySelector(".bf-scene");
+
+        if (!entry || !scene) return;
+
+        root.scrollIntoView?.({ block: "center", behavior: "smooth" });
+
+        // Zoom towards the token's spot in the formation.
+        const style = getComputedStyle(entry.slot);
+        const x = style.getPropertyValue("--x").trim() || "50%";
+        const y = style.getPropertyValue("--y").trim() || "50%";
+
+        const sceneBox = scene.getBoundingClientRect();
+        const tokenBox = entry.token.getBoundingClientRect();
+
+        const originX = tokenBox.left + tokenBox.width / 2 - sceneBox.left;
+        const originY = tokenBox.top + tokenBox.height / 2 - sceneBox.top;
+
+        scene.style.transformOrigin =
+            Number.isFinite(originX) && sceneBox.width > 0
+                ? `${originX}px ${originY}px`
+                : `${x} ${y}`;
+
+        root.classList.add("is-zooming");
+
+        const animation = scene.animate(
+            [
+                { transform: "scale(1)", offset: 0 },
+                { transform: "scale(2.1)", offset: 0.28 },
+                { transform: "scale(2.1)", offset: 0.78 },
+                { transform: "scale(1)", offset: 1 }
+            ],
+            { duration: 2400, easing: "ease-in-out" }
+        );
+
+        const done = () => {
+            root.classList.remove("is-zooming");
+            scene.style.transformOrigin = "";
+        };
+
+        animation.onfinish = done;
+        animation.oncancel = done;
+    });
 
     socket.on("room-closed", () => {
         closePopover();

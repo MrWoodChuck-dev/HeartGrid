@@ -154,6 +154,9 @@
                         <div class="host-monster-grid-container">
                             <h3>MONSTER GRID</h3>
                             <div id="host-monster-grid" class="heart-grid"></div>
+                            <p id="monster-setup-hint" class="monster-setup-hint" hidden>
+                                Click a cell to cycle it: HP, Armor, Overheal, Armor over Overheal.
+                            </p>
                         </div>
 
                         <button id="start-encounter-button" class="primary-button">
@@ -558,6 +561,7 @@
 
 <!-- LOAD SOCKET.IO AND THE MAIN GAME SCRIPT -->
 <script src="/socket.io/socket.io.js"></script>
+<script src="cards.js"></script>
 <script src="script.js"></script>
 
 <!-- ACTION STAGE (card -> explosion -> grid animation) AND BATTLEFIELD -->
@@ -725,8 +729,10 @@
 
         energyDisplay.classList.toggle("is-overflow", overflow);
 
-        setEnergyIcons(document.getElementById("energy-value-icons"), overflow);
-        setEnergyIcons(document.getElementById("energy-bar-icons"), overflow);
+        const negative = displayedEnergy < 0;
+
+        setEnergyIcons(document.getElementById("energy-value-icons"), overflow, negative);
+        setEnergyIcons(document.getElementById("energy-bar-icons"), overflow, negative);
     }
 
     /* RECEIVE ENERGY FROM SERVER */

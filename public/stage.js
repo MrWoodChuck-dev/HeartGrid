@@ -28,7 +28,7 @@
 
     Relies on globals from script.js: socket, currentRole, currentEncounter,
     roomPlayers, renderGrid, registerFx, fxRegistry, fxReducedMotion, the FX_*
-    durations, CARD_TYPE_COLORS and CARD_TYPE_LABELS.
+    durations, and the card colours / labels (getCardColor and getCardTypeLabel in cards.js).
 */
 
 (function () {
@@ -267,13 +267,13 @@
 
         wrap.style.setProperty(
             "--card-color",
-            segment.color || CARD_TYPE_COLORS[segment.cardType] || "#666"
+            segment.color || getCardColor(segment.cardType)
         );
 
         const header = el(
             "div",
             "stage-card-kicker",
-            segment.kicker || CARD_TYPE_LABELS[segment.cardType] || "CARD"
+            segment.kicker || getCardTypeLabel(segment.cardType)
         );
 
         const art = el("div", "stage-card-art");
@@ -514,13 +514,33 @@
         If a cursed cell was hit, a Curse card appears (once) and then the
         explosions play as one unbroken chain, however far it spreads.
     */
-    function monsterDamageSegments(pending) {
+    // How a cell looked, for the pop / fade ghost (shared with cards.js).
+    const lookOf = cellLook;
+
+    // The monster grid after the last grid segment (so a follow-up
+    // animation can carry on from where the previous one ended).
+    function finalGridState(segments) {
+        for (let i = segments.length - 1; i >= 0; i--) {
+            if (segments[i].type === "grid") return segments[i].after;
+        }
+
+        return null;
+    }
+
+    /*
+        "base" lets one damage event carry on from the grid an earlier event
+        left behind (an Attack, then Penetrate clearing Armor, then Status).
+        Each cell in a step says what it was and what it became, so the
+        animation shows exactly what happened (Overheal stripped, Armor
+        broken, HP lost).
+    */
+    function monsterDamageSegments(pending, base = null) {
         const { snapshot, steps, source } = pending;
         const size = snapshot.size;
         const label = `${(snapshot.name || "Monster").toUpperCase()} · MONSTER GRID`;
 
-        const cells = [...snapshot.cells];
-        const curses = new Set(snapshot.curses);
+        const cells = [...(base?.cells || snapshot.cells)];
+        const curses = new Set(base?.curses || snapshot.curses);
 
         const hitCurse = steps.some(step => step.cells.some(cell => cell.cursed));
         const isPoison = source === "status";
@@ -532,16 +552,24 @@
         const directHits = steps[0].cells.filter(cell => !cell.cursed);
         const phaseOneFx = [];
 
-        directHits.forEach(cell => {
-            cells[cell.index] = "empty";
+        // Penetrate-pierced Armor cracks instead of popping.
+        const hitState = { cracksLeft: pending.pierced || 0 };
 
-            phaseOneFx.push({
-                index: cell.index,
-                kind: isPoison ? "fade" : "pop",
-                look: "hp",
-                delay: 0,
-                duration: isPoison ? FX_FADE_MS : FX_POP_MS
-            });
+        directHits.forEach(cell => {
+            cells[cell.index] = cell.after || "empty";
+
+            // Some cards bring their own look for the cell they hit (cards.js).
+            const special = getMonsterHitFx(source, cell, hitState);
+
+            phaseOneFx.push(special
+                ? { index: cell.index, delay: 0, ...special }
+                : {
+                    index: cell.index,
+                    kind: isPoison ? "fade" : "pop",
+                    look: lookOf(cell.before),
+                    delay: 0,
+                    duration: isPoison ? FX_FADE_MS : FX_POP_MS
+                });
         });
 
         segments.push({
@@ -584,7 +612,7 @@
                 // Step 0's plain hits already played in phase 1.
                 if (stepIndex === 0 && !cell.cursed) return;
 
-                cells[cell.index] = "empty";
+                cells[cell.index] = cell.after || "empty";
 
                 if (cell.cursed) {
                     stepHasCurse = true;
@@ -598,10 +626,11 @@
                         duration: curseMs
                     });
                 } else {
+                    // Explosion damage is a plain pop whichever card started it.
                     chainFx.push({
                         index: cell.index,
                         kind: "pop",
-                        look: "hp",
+                        look: lookOf(cell.before),
                         delay: startAt,
                         duration: FX_POP_MS
                     });
@@ -631,17 +660,184 @@
         return (snapshot?.name || "Monster").toUpperCase();
     }
 
-    socket.on("player-attack-resolved", result => {
-        const pending = takePending("attack");
+    // The Thief's own empty cells refilling (Lifesteal), or any self-heal.
+    function ownHealSegment(playerID, healed, overhealed, style = "popin") {
+        const own = snapshotPlayer(playerID);
+
+        if (!own || (healed.length === 0 && overhealed.length === 0)) return null;
+
+        const cells = [...own.cells];
+        const fx = [];
+
+        // Rest and Spellvamp heal in their own way (cards.js).
+        const healFx = {
+            popin: { kind: "popin", duration: FX_POPIN_MS },
+            rest: { kind: "restgrow", duration: 1700 },
+            vamp: { kind: "vampheal", duration: 1000 }
+        }[style] || { kind: "popin", duration: FX_POPIN_MS };
+
+        healed.forEach(index => {
+            cells[index] = "hp";
+            fx.push({ index, look: "hp", delay: 0, ...healFx });
+        });
+
+        overhealed.forEach(index => {
+            cells[index] = "overheal";
+            fx.push({ index, look: "overheal", delay: 0, ...healFx });
+        });
+
+        return {
+            type: "grid",
+            label: `${own.name.toUpperCase()} · HEART GRID`,
+            size: own.size,
+            before: copyState(own),
+            after: copyState({ cells, marks: own.marks }),
+            fx
+        };
+    }
+
+    /*
+        Lifesteal healing the Thief: a red wave sweeps the grid top row to
+        bottom row, then the rows turn green again in the same order. A cell
+        that gets healed stays empty until the wave hits it, swells deep red,
+        and slams down into green once its row is green again.
+    */
+    function lifestealSegment(playerID, healed) {
+        const own = snapshotPlayer(playerID);
+
+        if (!own || healed.length === 0) return null;
+
+        const STEP = 320;
+        const SLAM = 260;
+        const size = own.size;
+        const cells = [...own.cells];
+
+        healed.forEach(index => {
+            cells[index] = "hp";
+        });
+
+        const fx = own.cells.map((cell, index) => {
+            const row = Math.floor(index / size);
+
+            return healed.includes(index)
+                ? { index, kind: "lsheal", look: "hp", row, rows: size, step: STEP, delay: 0, duration: (size + row + 1) * STEP + SLAM }
+                : { index, kind: "lswave", look: cell, row, rows: size, step: STEP, delay: 0, duration: (size + row + 1) * STEP };
+        });
+
+        return {
+            type: "grid",
+            label: `${own.name.toUpperCase()} · HEART GRID`,
+            size,
+            before: copyState(own),
+            after: copyState({ cells, marks: own.marks }),
+            fx
+        };
+    }
+
+    /*
+        Attack and Blast: the card, then everything that happened to the
+        monster's grid in order: the hit itself, Penetrate clearing Armor
+        next to it, Status adding damage, then the Thief's Lifesteal.
+    */
+    function gridAttackResolved(result, cardType, mainSource) {
+        const lines = [`${result.damage} damage`];
+
+        if (result.armorDestroyed > 0) {
+            lines.push(`${plural(result.armorDestroyed, "Armor cell")} destroyed`);
+        }
 
         const segments = [{
             type: "card",
-            cardType: "attack",
+            cardType,
             title: result.cardName,
-            lines: [`${result.damage} damage`]
+            lines
+        }];
+
+        let base = null;
+
+        const main = takePending(mainSource);
+
+        if (main) {
+            // Armor the Thief pierced cracks apart (Penetrate).
+            main.pierced = result.piercedArmor || 0;
+
+            const part = monsterDamageSegments(main, base);
+            segments.push(...part);
+            base = finalGridState(part) || base;
+        }
+
+        const penetrate = takePending("penetrate");
+
+        if (penetrate) {
+            segments.push({
+                type: "card",
+                cardType: "penetrate",
+                kicker: "PENETRATE",
+                title: "Armor Cleared",
+                lines: [`${plural(result.connectedArmor || 1, "connected Armor cell")} removed`]
+            });
+
+            const part = monsterDamageSegments(penetrate, base);
+            segments.push(...part);
+            base = finalGridState(part) || base;
+        }
+
+        const status = takePending("status");
+
+        if (status) {
+            segments.push({
+                type: "card",
+                cardType: "status",
+                kicker: "STATUS CHARGE",
+                title: "Status",
+                lines: [`${result.statusDamage} extra damage`]
+            });
+
+            const part = monsterDamageSegments(status, base);
+            segments.push(...part);
+            base = finalGridState(part) || base;
+        }
+
+        const heal = lifestealSegment(result.playerID, result.healPositions || []);
+
+        if (heal) segments.push(heal);
+
+        enqueue({
+            actor: actorLabel(result.playerID, result.username),
+            segments
+        });
+    }
+
+    socket.on("player-attack-resolved", result => {
+        gridAttackResolved(result, "attack", "attack");
+    });
+
+    socket.on("player-blast-resolved", result => {
+        gridAttackResolved(result, "blast", "blast");
+    });
+
+    socket.on("player-spellvamp-resolved", result => {
+        const pending = takePending("spellvamp");
+
+        const segments = [{
+            type: "card",
+            cardType: "spellvamp",
+            title: result.cardName,
+            lines: [
+                `+${result.chargesGained} Spellvamp Charge${result.chargesGained === 1 ? "" : "s"}`
+            ]
         }];
 
         if (pending) segments.push(...monsterDamageSegments(pending));
+
+        const heal = ownHealSegment(
+            result.playerID,
+            result.healedPositions || [],
+            result.overhealedPositions || [],
+            "vamp"
+        );
+
+        if (heal) segments.push(heal);
 
         enqueue({
             actor: actorLabel(result.playerID, result.username),
@@ -649,43 +845,17 @@
         });
     });
 
-    socket.on("player-lifesteal-resolved", result => {
-        const pending = takePending("lifesteal");
-        const own = snapshotPlayer(result.playerID);
+    socket.on("player-execute-resolved", result => {
+        const pending = takePending("execute");
 
         const segments = [{
             type: "card",
-            cardType: "lifesteal",
+            cardType: "execute",
             title: result.cardName,
-            lines: [
-                `${result.damage} damage`,
-                `${result.healed} HP restored`
-            ]
+            lines: [`${result.damage} damage`]
         }];
 
         if (pending) segments.push(...monsterDamageSegments(pending));
-
-        // Then the Thief's own grid refills.
-        const healPositions = result.healPositions || [];
-
-        if (own && healPositions.length > 0) {
-            const cells = [...own.cells];
-
-            healPositions.forEach(index => {
-                cells[index] = "hp";
-            });
-
-            segments.push({
-                type: "grid",
-                label: `${own.name.toUpperCase()} · HEART GRID`,
-                size: own.size,
-                before: copyState(own),
-                after: copyState({ cells, marks: own.marks }),
-                fx: healPositions.map(index => ({
-                    index, kind: "popin", look: "hp", delay: 0, duration: FX_POPIN_MS
-                }))
-            });
-        }
 
         enqueue({
             actor: actorLabel(result.playerID, result.username),
@@ -902,38 +1072,78 @@
         });
     });
 
-    // A Thief activating Status is NOT shown. The poison ticking is: the turn
-    // count drops, then the damage it dealt lands on the monster.
-    socket.on("thief-status-resolved", result => {
-        const pending = takePending("status");
+    // Cards that only load a number: a card with a counter going up.
+    function chargeCard(event, cardType, label, valueOf) {
+        socket.on(event, result => {
+            const { added, total } = valueOf(result);
 
-        const lines = [];
+            enqueue({
+                actor: actorLabel(result.playerID, result.username),
+                segments: [{
+                    type: "card",
+                    cardType,
+                    title: result.cardName,
+                    counter: { from: total - added, to: total, label },
+                    shake: 0,
+                    hold: 1500
+                }]
+            });
+        });
+    }
 
-        if (result.damage > 0) {
-            lines.push(`${result.damage} damage`);
-        } else {
-            lines.push("Nothing left to poison");
-        }
+    chargeCard("player-status-resolved", "status", "STATUS CHARGES",
+        r => ({ added: r.added, total: r.charges }));
+    chargeCard("player-lifesteal-resolved", "lifesteal", "LIFESTEAL CHARGES",
+        r => ({ added: r.added, total: r.charges }));
+    chargeCard("player-penetrate-resolved", "penetrate", "PENETRATE CHARGES",
+        r => ({ added: r.added, total: r.charges }));
 
-        if (result.expired) lines.push("The poison has worn off");
+    // Hex has no staging: every Attack / Blast card shows its discount
+    // instead (cards.js). Shield has none either: the Battlefield zooms in
+    // on the protected player and shows the bubble (battlefield.js).
 
+    socket.on("player-rest-resolved", result => {
+        enqueue({
+            actor: actorLabel(result.playerID, result.username),
+            segments: [{
+                type: "card",
+                cardType: "rest",
+                title: result.cardName,
+                lines: ["Resting. Can't act until it ends"],
+                counter: { from: 0, to: result.turns, label: "REST TURNS" },
+                shake: 0,
+                hold: 1500
+            }]
+        });
+    });
+
+    // A Rest turn passing: the turn count drops and the Tank heals.
+    socket.on("player-rest-tick", result => {
         const segments = [{
             type: "card",
-            cardType: "status",
-            kicker: "STATUS · POISON",
-            title: `${result.thiefUsername}'s Poison`,
+            cardType: "rest",
+            kicker: result.expired ? "REST ENDED" : "RESTING",
+            title: `${result.username} rests`,
             counter: {
-                from: result.remainingTurns + 1,
-                to: result.remainingTurns,
-                label: "POISON TURNS LEFT"
+                from: result.turnsLeft + 1,
+                to: result.turnsLeft,
+                label: "REST TURNS LEFT"
             },
-            lines
+            shake: 0,
+            hold: 900
         }];
 
-        if (pending) segments.push(...monsterDamageSegments(pending));
+        const heal = ownHealSegment(
+            result.playerID,
+            result.healedPositions || [],
+            result.overhealedPositions || [],
+            "rest"
+        );
+
+        if (heal) segments.push(heal);
 
         enqueue({
-            actor: `${result.thiefUsername.toUpperCase()} · THIEF`,
+            actor: actorLabel(result.playerID, result.username),
             segments
         });
     });

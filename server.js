@@ -14,8 +14,9 @@ const MAX_CARDS = 4;
 const MAX_ENERGY = 9;
 const STARTING_ENERGY = 5;
 
-// Rage: every HP / Overheal position sacrificed grants this much Energy.
-const RAGE_ENERGY_PER_POSITION = 2;
+// Every card (definitions, costs, rules and the socket handler that plays it)
+// lives in cards-server.js. This file only keeps the core game.
+const cards = require("./cards-server");
 
 const ENERGY_REGEN = {
     Tank: 1,
@@ -35,60 +36,8 @@ const CLASS_GRID_SIZES = {
     Thief: 3
 };
 
-const HEALING_CLASSES = ["Support", "Mage"];
-
-const ALLOWED_CARD_TYPES = {
-    Tank: ["attack", "taunt", "retaliate"],
-    Warrior: ["attack", "rage", "counter"],
-    Mage: ["attack", "heal", "curse"],
-    Support: ["heal", "buff", "weaken"],
-    Thief: ["attack", "status", "lifesteal"]
-};
-
-// Every class except Support can use Attack cards.
-const ATTACK_CLASSES = ["Tank", "Warrior", "Mage", "Thief"];
-
-// Card types that use the 3x3 pattern editor.
-const PATTERN_CARD_TYPES = [
-    "attack",
-    "heal",
-    "rage",
-    "lifesteal",
-    "retaliate",
-    "curse"
-];
-
-/*
-    Position limits for the expensive cards. The Energy cap is 9, so a
-    card that would cost more than 9 could never be used.
-
-    Lifesteal: 2 Energy per position   -> 2-4 positions (max 8)
-    Counter / Curse / Weaken: 1.5x     -> 2-6 positions (max 9)
-*/
-const CARD_RULES = {
-    lifesteal: { min: 2, max: 4 },
-    counter: { min: 2, max: 6 },
-    curse: { min: 2, max: 6 },
-    weaken: { min: 2, max: 6 }
-};
-
-// Energy cost of using a card. 1.5x costs remain fractional.
-function getCardCost(card) {
-    const n = card.targetCount;
-
-    switch (card.type) {
-        case "rage":
-            return 0;
-        case "lifesteal":
-            return n * 2;
-        case "counter":
-        case "curse":
-        case "weaken":
-            return n * 1.5;
-        default:
-            return n;
-    }
-}
+// Monster cells the Host may paint before an encounter starts.
+const MONSTER_SETUP_STATES = ["hp", "overheal", "armor", "armor-overheal"];
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -133,7 +82,7 @@ function regeneratePlayerEnergy(player) {
 // Retaliate marks, Energy and the cards a player is holding are all secret
 // from the Host, so they are only included when the state is sent to a player.
 // Teammates can look at them on the battlefield; the Host cannot.
-function getPublicPlayer(player, includeMarks = false) {
+function getPublicPlayer(player, includeMarks = false, room = null) {
     const publicPlayer = {
         id: player.id,
         username: player.username,
@@ -143,9 +92,12 @@ function getPublicPlayer(player, includeMarks = false) {
         cardCount: player.cards.length,
         hasAssignment: Boolean(player.assignment),
         counterTurns: player.counterTurns ?? 0,
-        status: player.status
-            ? { ...player.status }
-            : null
+
+        // Card effects are visible to everyone (Retaliate marks are the one secret).
+        charges: { ...(player.charges || {}) },
+        rest: player.rest || 0,
+        shieldBreak: player.shieldBreak || 0,
+        shielded: Boolean(room && cards.isShielded(room, player))
     };
 
     if (includeMarks) {
@@ -169,7 +121,7 @@ function getPublicPlayer(player, includeMarks = false) {
 
 function getPartyState(room, includeMarks = false) {
     return Array.from(room.players.values()).map(
-        player => getPublicPlayer(player, includeMarks)
+        player => getPublicPlayer(player, includeMarks, room)
     );
 }
 
@@ -223,12 +175,10 @@ function getMonsterEffects(room) {
             0
         ) + (room.counterTurn ? 1 : 0);
 
+    // Status is a Charge card now: the total the Thief is holding.
     const status = players.reduce(
         (total, player) =>
-            total +
-            (player.status?.type === "thief"
-                ? Math.max(0, player.status.remainingTurns || 0)
-                : 0),
+            total + Math.max(0, player.charges?.status || 0),
         0
     );
 
@@ -236,7 +186,10 @@ function getMonsterEffects(room) {
         taunt: Math.max(0, room.taunt?.remainingDamage || 0),
         weaken: Math.max(0, room.weaken || 0),
         counter,
-        status
+        status,
+        // Battlefield effects that count down in monster turns.
+        hex: Math.max(0, room.hex?.remaining || 0),
+        shield: Math.max(0, room.shield?.remaining || 0)
     };
 }
 
@@ -272,7 +225,27 @@ function getEncounterState(room) {
             ? {
                 tankID: room.taunt.tankID,
                 tankUsername: room.taunt.tankUsername,
-                remainingDamage: room.taunt.remainingDamage
+                remainingDamage: room.taunt.remainingDamage,
+                // Resting or Shielded: the charges wait, the monster is free.
+                paused: cards.isTauntPaused(
+                    room,
+                    room.players.get(room.taunt.tankID)
+                )
+            }
+            : null,
+
+        // Hex discounts Attack / Blast costs for everyone while it lasts.
+        hex: room.hex
+            ? { remaining: room.hex.remaining }
+            : null,
+
+        // The one player the monster can't target right now.
+        shield: room.shield
+            ? {
+                targetID: room.shield.targetID,
+                supportID: room.shield.supportID,
+                remaining: room.shield.remaining,
+                total: room.shield.total
             }
             : null
     };
@@ -316,9 +289,9 @@ function sendPlayerState(player) {
         energy: player.energy ?? 0,
         counterTurns: player.counterTurns ?? 0,
         marks: [...(player.marks || [])],
-        status: player.status
-            ? { ...player.status }
-            : null
+        charges: { ...(player.charges || {}) },
+        rest: player.rest || 0,
+        shieldBreak: player.shieldBreak || 0
     });
 }
 
@@ -344,7 +317,12 @@ function emitToPlayersAndHost(room, eventName, fullData, hostData) {
     // Unless told otherwise, the Host gets the same result without anyone's
     // Energy figures (see getPublicPlayer for why).
     if (hostData === undefined) {
-        const { energySpent, remainingEnergy, ...publicData } = fullData;
+        const {
+            energySpent,
+            remainingEnergy,
+            energyPenalty,
+            ...publicData
+        } = fullData;
         hostData = publicData;
     }
 
@@ -365,65 +343,140 @@ function getHittablePositions(grid) {
         .filter(index => index !== -1);
 }
 
+// Healthy monster cells: plain HP only (no Overheal, no Armor).
 function getHealthyMonsterPositions(encounter) {
     return encounter.grid
         .map((cell, index) => cell === "hp" ? index : -1)
         .filter(index => index !== -1);
 }
 
+// What Status may pick: healthy and Overheal cells, never Armor.
+function getStatusTargetPositions(encounter) {
+    return encounter.grid
+        .map((cell, index) => isHittable(cell) ? index : -1)
+        .filter(index => index !== -1);
+}
+
 /* =====================================
-   MONSTER DAMAGE (WITH CURSE CHAINS)
+   MONSTER DAMAGE (ARMOR + CURSE CHAINS)
 ===================================== */
 
 /*
     Every source of damage to the monster goes through here:
-    attacks, Lifesteal, poison, Retaliate, and Curse explosions.
+    attacks, Blast, Spellvamp, Execute, Status, Retaliate and Curse
+    explosions.
+
+    Hitting a cell:
+        hp        -> empty
+        overheal  -> hp      (the Overheal is used up)
+        armor     -> empty / overheal   (only if options.gridBased)
+
+    ARMOR is only ever touched by grid-based attacks (options.gridBased).
+    Execute, Status, Retaliate and Curse explosions skip it completely.
 
     A cursed position that is damaged explodes: the positions up, down,
-    left and right of it are damaged too. Those can be cursed as well,
-    which makes a chain reaction. Each curse only explodes once.
+    left and right of it are damaged too (Armor ignores explosions). Those
+    can be cursed as well, which makes a chain reaction. Each curse only
+    explodes once.
+
+    Returns:
+        damage          cells that lost HP (direct hits and explosions)
+        overhealDamage  cells that lost Overheal
+        exploded        curses that went off
+        armorBroken     Armor cells destroyed (positions)
+        directPositions every cell the attack itself changed (Armor included)
+        directHits      the same, without Armor: the "successful hits"
 */
-function damageMonsterCells(room, positions, source = "attack") {
+function damageMonsterCells(room, positions, source = "attack", options = {}) {
     const encounter = room.encounter;
     const size = encounter.size;
     const curses = encounter.curses;
+    const gridBased = Boolean(options.gridBased);
 
     const exploded = [];
 
     // Visual chain for the clients: step 0 is everything hit directly,
     // step 1 is everything hurt by the explosions of step 0, and so on.
-    // Each cell says whether it was cursed so the client can shake it first.
+    // Each cell carries its old and new state so the client can animate it.
     const steps = [];
 
-    let damage = 0;
+    const result = {
+        damage: 0,
+        overhealDamage: 0,
+        exploded,
+        armorBroken: [],
+        directPositions: [],
+        directHits: []
+    };
+
+    // Changes one cell, or returns null when this hit does nothing to it.
+    function hitCell(index, canBreakArmor) {
+        const before = encounter.grid[index];
+
+        let after = null;
+
+        if (before === "hp") {
+            after = "empty";
+        } else if (before === "overheal") {
+            after = "hp";
+        } else if (canBreakArmor && cards.isArmorCell(before)) {
+            after = cards.ARMOR_BREAKS_TO[before];
+        }
+
+        if (after === null) return null;
+
+        encounter.grid[index] = after;
+
+        if (before === "overheal") {
+            result.overhealDamage++;
+        } else if (before === "hp") {
+            result.damage++;
+        }
+
+        return { index, before, after };
+    }
+
     let current = [];
+    const seen = new Set();
 
     positions.forEach(position => {
-        if (encounter.grid[position] === "hp") {
-            encounter.grid[position] = "empty";
-            damage++;
-            current.push(position);
+        if (seen.has(position)) return;
+        seen.add(position);
+
+        const change = hitCell(position, gridBased);
+
+        if (!change) return;
+
+        current.push(change);
+        result.directPositions.push(position);
+
+        if (cards.isArmorCell(change.before)) {
+            result.armorBroken.push(position);
+        } else {
+            result.directHits.push(position);
         }
     });
 
     while (current.length > 0) {
         steps.push({
-            cells: current.map(index => ({
-                index,
-                cursed: curses.has(index)
+            cells: current.map(change => ({
+                index: change.index,
+                cursed: curses.has(change.index),
+                before: change.before,
+                after: change.after
             }))
         });
 
         const next = [];
 
-        current.forEach(cell => {
-            if (!curses.has(cell)) return;
+        current.forEach(change => {
+            if (!curses.has(change.index)) return;
 
-            curses.delete(cell);
-            exploded.push(cell);
+            curses.delete(change.index);
+            exploded.push(change.index);
 
-            const row = Math.floor(cell / size);
-            const column = cell % size;
+            const row = Math.floor(change.index / size);
+            const column = change.index % size;
 
             [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dRow, dColumn]) => {
                 const r = row + dRow;
@@ -431,13 +484,10 @@ function damageMonsterCells(room, positions, source = "attack") {
 
                 if (r < 0 || r >= size || c < 0 || c >= size) return;
 
-                const index = r * size + c;
+                // Armor ignores Curse explosions.
+                const explosion = hitCell(r * size + c, false);
 
-                if (encounter.grid[index] === "hp") {
-                    encounter.grid[index] = "empty";
-                    damage++;
-                    next.push(index);
-                }
+                if (explosion) next.push(explosion);
             });
         });
 
@@ -452,7 +502,52 @@ function damageMonsterCells(room, positions, source = "attack") {
         });
     }
 
-    return { damage, exploded };
+    return result;
+}
+
+/*
+    Takes defences off cells WITHOUT damaging them: no HP is ever lost.
+    Used by Penetrate (Armor next to a hit cell) and Spellvamp.
+
+        armor           -> hp        (the HP cell that was underneath)
+        armor-overheal  -> overheal  (or hp when options.stripOverheal)
+        overheal        -> hp        (only when options.stripOverheal)
+
+    Returns what changed: [{ index, before, after }].
+*/
+function stripMonsterDefenses(room, positions, source, options = {}) {
+    const encounter = room.encounter;
+    const changes = [];
+
+    positions.forEach(index => {
+        const before = encounter.grid[index];
+
+        let after = null;
+
+        if (before === "armor") {
+            after = "hp";
+        } else if (before === "armor-overheal") {
+            after = options.stripOverheal ? "hp" : "overheal";
+        } else if (before === "overheal" && options.stripOverheal) {
+            after = "hp";
+        }
+
+        if (after === null) return;
+
+        encounter.grid[index] = after;
+        changes.push({ index, before, after });
+    });
+
+    if (changes.length > 0) {
+        io.to(room.roomID).emit("monster-damage-fx", {
+            source,
+            steps: [{
+                cells: changes.map(change => ({ ...change, cursed: false }))
+            }]
+        });
+    }
+
+    return changes;
 }
 
 /* =====================================
@@ -613,11 +708,11 @@ function finishPlayerAction(room, player) {
    COUNTER (WARRIOR)
 ===================================== */
 
-function canAffordAnAttack(player) {
+function canAffordAnAttack(player, room) {
     return player.cards.some(
         card =>
             card.type === "attack" &&
-            player.energy >= getCardCost(card)
+            player.energy >= cards.getCardCost(card, room)
     );
 }
 
@@ -632,69 +727,6 @@ function findCounteringWarrior(room) {
             (player.counterTurns || 0) > 0 &&
             !isDead(player)
     ) || null;
-}
-
-/* =====================================
-   THIEF STATUS (POISON)
-===================================== */
-
-function resolveThiefStatus(room, thief) {
-    if (
-        !thief.status ||
-        thief.status.type !== "thief"
-    ) {
-        return;
-    }
-
-    // Poison only ever hits the MONSTER's grid. No friendly fire.
-    const encounter = room.encounter;
-
-    let result = {
-        thiefID: thief.id,
-        thiefUsername: thief.username,
-        monsterName: encounter?.name || "the monster",
-        positions: [],
-        damage: 0,
-        damageRoll: 0
-    };
-
-    if (encounter?.active) {
-        const healthyPositions = getHealthyMonsterPositions(encounter);
-
-        if (healthyPositions.length > 0) {
-            // Randomly deal either 1 or 2 damage.
-            const damageRoll = crypto.randomInt(1, 3);
-
-            const positions = shuffle(healthyPositions).slice(
-                0,
-                Math.min(damageRoll, healthyPositions.length)
-            );
-
-            // Goes through the shared damage code so Curses can chain.
-            const hit = damageMonsterCells(room, positions, "status");
-
-            result = {
-                ...result,
-                positions,
-                damage: hit.damage,
-                damageRoll
-            };
-        }
-    }
-
-    thief.status.remainingTurns--;
-
-    const remainingTurns = Math.max(0, thief.status.remainingTurns);
-
-    if (remainingTurns <= 0) {
-        thief.status = null;
-    }
-
-    io.to(room.roomID).emit("thief-status-resolved", {
-        ...result,
-        remainingTurns,
-        expired: remainingTurns <= 0
-    });
 }
 
 /* =====================================
@@ -713,13 +745,9 @@ function advanceTurn(room) {
     } else {
         const currentTurn = getCurrentTurn(room);
 
-        // Resolve Thief Status when the Thief finishes their turn.
-        if (currentTurn?.type === "player") {
-            const currentPlayer = room.players.get(currentTurn.id);
-
-            if (currentPlayer) {
-                resolveThiefStatus(room, currentPlayer);
-            }
+        // The monster's turn is over: Hex, Shield and Shield Break count down.
+        if (currentTurn?.type === "monster") {
+            cards.tickMonsterTurnEffects(room);
         }
 
         // Counter is a bonus turn after the Monster's turn, whether the monster
@@ -766,14 +794,42 @@ function advanceTurn(room) {
     room.monsterHasActed = false;
     room.monsterAttackedThisTurn = false;
 
-    const nextTurn = getCurrentTurn(room);
+    beginTurn(room);
+}
 
-    if (nextTurn?.type === "player") {
-        const player = room.players.get(nextTurn.id);
+/*
+    The new turn has started: its player regenerates Energy.
 
-        if (player) {
-            regeneratePlayerEnergy(player);
-        }
+    A player who is Resting gets extra Energy and a heal instead of a turn,
+    and the turn passes straight on to whoever is next. Rest can't be
+    cancelled, so nothing (not even the monster) wakes them up early.
+*/
+function beginTurn(room) {
+    const total = room.initiativeOrder.length;
+
+    for (let guard = 0; guard <= total; guard++) {
+        const turn = getCurrentTurn(room);
+
+        if (turn?.type !== "player") return;
+
+        const player = room.players.get(turn.id);
+
+        if (!player) return;
+
+        regeneratePlayerEnergy(player);
+
+        if (!(player.rest > 0)) return;
+
+        cards.processRestTurn(room, player);
+
+        // Sleep through the turn.
+        room.turnIndex = (room.turnIndex + 1) % total;
+
+        skipDeadTurns(room);
+
+        room.attackRoll = null;
+        room.monsterHasActed = false;
+        room.monsterAttackedThisTurn = false;
     }
 }
 
@@ -802,10 +858,12 @@ function resetEncounterEffects(room) {
 
     for (const player of room.players.values()) {
         player.energy = STARTING_ENERGY;
-        player.status = null;
         player.marks = new Set();
         player.counterTurns = 0;
     }
+
+    // Charges, Rest, Shield Break, Hex and Shield.
+    cards.resetCardState(room);
 }
 
 function startInitiative(room) {
@@ -927,6 +985,29 @@ function isPlayer(socket, room) {
    CONNECTION
 ===================================== */
 
+// Everything cards-server.js needs from the core game.
+cards.init({
+    io,
+    rooms,
+    MAX_ENERGY,
+    randomInt: (min, max) => crypto.randomInt(min, max),
+    shuffle,
+    getActingPlayer,
+    isPlayer,
+    isDead,
+    isHittable,
+    getHittablePositions,
+    getHealthyMonsterPositions,
+    getStatusTargetPositions,
+    calculateCardPositions,
+    damageMonsterCells,
+    stripMonsterDefenses,
+    emitToPlayersAndHost,
+    emitTurnState,
+    finishPlayerAction,
+    advanceTurn
+});
+
 io.on("connection", socket => {
     console.log("Connected:", socket.id);
 
@@ -958,7 +1039,9 @@ io.on("connection", socket => {
             monsterAttackedThisTurn: false,
             counterTurn: null,
             weaken: 0,
-            taunt: null
+            taunt: null,
+            hex: null,
+            shield: null
         });
 
         socket.data.roomID = roomID;
@@ -1073,9 +1156,9 @@ io.on("connection", socket => {
             gridSize,
             grid: createGrid(gridSize),
             energy: STARTING_ENERGY,
-            status: null,
             marks: new Set(),
-            counterTurns: 0
+            counterTurns: 0,
+            ...cards.createPlayerCardState()
         };
 
         room.players.set(socket.id, player);
@@ -1154,6 +1237,18 @@ io.on("connection", socket => {
             return;
         }
 
+        // Some cards only allow certain sizes. Don't hand out a number
+        // that none of this class's cards can use.
+        if (!cards.classCanUseCount(player.className, targetCount)) {
+            socket.emit(
+                "assignment-error",
+                `${player.className} has no card that can use ${targetCount} positions. ` +
+                "Choose a smaller number."
+            );
+
+            return;
+        }
+
         player.assignment = {
             id: crypto.randomUUID(),
             targetCount,
@@ -1211,7 +1306,7 @@ io.on("connection", socket => {
 
         const cardType = String(data?.type || "");
 
-        if (!ALLOWED_CARD_TYPES[player.className]?.includes(cardType)) {
+        if (!cards.CLASS_CARD_TYPES[player.className]?.includes(cardType)) {
             socket.emit(
                 "card-save-error",
                 "Invalid card type for your class."
@@ -1222,9 +1317,9 @@ io.on("connection", socket => {
 
         // Expensive cards only work with certain position counts,
         // because their Energy cost must fit under the cap of 9.
-        const rule = CARD_RULES[cardType];
+        if (!cards.isCardCountAllowed(cardType, targetCount)) {
+            const rule = cards.CARD_DEFS[cardType];
 
-        if (rule && (targetCount < rule.min || targetCount > rule.max)) {
             socket.emit(
                 "card-save-error",
                 `${cardType.toUpperCase()} cards can only have ${rule.min}-${rule.max} positions. ` +
@@ -1243,8 +1338,8 @@ io.on("connection", socket => {
             return;
         }
 
-        // Buff, Taunt, Status, Counter and Weaken do not need a 3x3 pattern.
-        if (PATTERN_CARD_TYPES.includes(cardType)) {
+        // Only grid cards need a 3x3 pattern; charge and turn cards just use a count.
+        if (cards.cardUsesPattern(cardType)) {
             if (
                 !Array.isArray(pattern) ||
                 pattern.length !== targetCount ||
@@ -1268,7 +1363,7 @@ io.on("connection", socket => {
             id: crypto.randomUUID(),
             name,
             targetCount,
-            pattern: PATTERN_CARD_TYPES.includes(cardType) ? [...pattern] : [],
+            pattern: cards.cardUsesPattern(cardType) ? [...pattern] : [],
             type: cardType,
             createdAt: Date.now()
         };
@@ -1283,81 +1378,6 @@ io.on("connection", socket => {
 
         console.log(
             `${player.username} created ${cardType} card: ${name}`
-        );
-    });
-
-    /* =====================================
-       THIEF STATUS CARD
-    ===================================== */
-
-    socket.on("player-status", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Thief",
-            "Only Thief can use Status cards."
-        );
-
-        if (!player) return;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "status") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Status card."
-            );
-
-            return;
-        }
-
-        if (player.status?.type === "thief") {
-            socket.emit(
-                "combat-action-error",
-                "Your Status is already active."
-            );
-
-            return;
-        }
-
-        // Position count = number of turns = Energy cost.
-        const duration = card.targetCount;
-
-        if (player.energy < duration) {
-            socket.emit(
-                "combat-action-error",
-                "Not enough Energy to use this Status card."
-            );
-
-            return;
-        }
-
-        player.energy -= duration;
-
-        player.status = {
-            type: "thief",
-            remainingTurns: duration
-        };
-
-        emitToPlayersAndHost(room, "player-status-resolved", {
-            playerID: player.id,
-            username: player.username,
-            cardName: card.name,
-            duration,
-            energySpent: duration,
-            remainingEnergy: player.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} used Status card ${card.name} for ${duration} turns.`
         );
     });
 
@@ -1486,6 +1506,45 @@ io.on("connection", socket => {
     });
 
     /* =====================================
+       HOST PAINTS MONSTER CELLS (Overheal / Armor)
+    ===================================== */
+
+    socket.on("edit-monster-cell", data => {
+        const roomID = socket.data.roomID;
+        const room = rooms.get(roomID);
+
+        if (!isHost(socket, room)) return;
+
+        const encounter = room.encounter;
+
+        if (!encounter || encounter.active) {
+            socket.emit(
+                "encounter-error",
+                "Monster cells can only be changed before the encounter starts."
+            );
+
+            return;
+        }
+
+        const index = Number(data?.index);
+        const state = String(data?.state || "");
+
+        if (
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= encounter.grid.length ||
+            !MONSTER_SETUP_STATES.includes(state)
+        ) {
+            return;
+        }
+
+        encounter.grid[index] = state;
+        encounter.curses.delete(index);
+
+        updateEncounter(roomID);
+    });
+
+    /* =====================================
        START ENCOUNTER
     ===================================== */
 
@@ -1583,9 +1642,13 @@ io.on("connection", socket => {
         // Soft reset: full HP and starting Energy. Cards are kept.
         player.grid = createGrid(player.gridSize);
         player.energy = STARTING_ENERGY;
-        player.status = null;
         player.marks = new Set();
         player.counterTurns = 0;
+        cards.resetPlayerCardState(player);
+
+        if (room.shield?.targetID === player.id) {
+            room.shield = null;
+        }
 
         // A revived Tank starts fresh, without a leftover Taunt.
         if (room.taunt?.tankID === player.id) {
@@ -1800,7 +1863,10 @@ io.on("connection", socket => {
             ) {
                 room.taunt = null;
                 updateEncounter(roomID);
-            } else if (data?.playerID !== tank.id) {
+            } else if (
+                !cards.isTauntPaused(room, tank) &&
+                data?.playerID !== tank.id
+            ) {
                 socket.emit(
                     "monster-attack-error",
                     `Taunt is active! You must target ${tank.username}.`
@@ -1822,6 +1888,15 @@ io.on("connection", socket => {
             return;
         }
 
+        if (cards.isShielded(room, player)) {
+            socket.emit(
+                "monster-attack-error",
+                `${player.username} is Shielded and cannot be targeted.`
+            );
+
+            return;
+        }
+
         const hittableCount = getHittablePositions(player.grid).length;
 
         if (hittableCount === 0) {
@@ -1833,8 +1908,11 @@ io.on("connection", socket => {
             return;
         }
 
+        // A paused Taunt (Tank resting) doesn't force or soak anything.
         const tauntedTank =
-            room.taunt && room.taunt.tankID === player.id;
+            room.taunt &&
+            room.taunt.tankID === player.id &&
+            !cards.isTauntPaused(room, player);
 
         let maxCount = Math.min(
             room.attackRoll,
@@ -1917,7 +1995,9 @@ io.on("connection", socket => {
 
         // If nobody has HP left to hit, the leftover is lost.
         const anyoneHittable = Array.from(room.players.values()).some(
-            member => getHittablePositions(member.grid).length > 0
+            member =>
+                getHittablePositions(member.grid).length > 0 &&
+                !cards.isShielded(room, member)
         );
 
         if (!anyoneHittable) {
@@ -1977,929 +2057,12 @@ io.on("connection", socket => {
     });
 
     /* =====================================
-       PLAYER ATTACK
+       CARDS
     ===================================== */
 
-    socket.on("player-attack", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(socket, room, null, null, true);
-
-        if (!player) return;
-
-        if (!ATTACK_CLASSES.includes(player.className)) {
-            socket.emit(
-                "combat-action-error",
-                "Your class cannot use Attack cards."
-            );
-
-            return;
-        }
-
-        const encounter = room.encounter;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "attack") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Attack card."
-            );
-
-            return;
-        }
-
-        if (player.energy < card.targetCount) {
-            socket.emit(
-                "combat-action-error",
-                "Not enough Energy to use this card."
-            );
-
-            return;
-        }
-
-        const positions = calculateCardPositions(
-            card,
-            data?.anchor,
-            encounter.size
-        );
-
-        if (!positions) {
-            socket.emit(
-                "combat-action-error",
-                "That pattern does not fit there."
-            );
-
-            return;
-        }
-
-        const hit = damageMonsterCells(room, positions);
-
-        player.energy -= card.targetCount;
-
-        emitToPlayersAndHost(room, "player-attack-resolved", {
-            playerID: player.id,
-            username: player.username,
-            cardName: card.name,
-            positions,
-            damage: hit.damage,
-            exploded: hit.exploded.length,
-            energySpent: card.targetCount,
-            remainingEnergy: player.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} attacked ${encounter.name} with ${card.name}. Damage: ${hit.damage}`
-        );
-    });
-
-    /* =====================================
-       THIEF LIFESTEAL
-    ===================================== */
-
-    socket.on("player-lifesteal", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Thief",
-            "Only Thief can use Lifesteal cards."
-        );
-
-        if (!player) return;
-
-        const encounter = room.encounter;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "lifesteal") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Lifesteal card."
-            );
-
-            return;
-        }
-
-        const cost = getCardCost(card);
-
-        if (player.energy < cost) {
-            socket.emit(
-                "combat-action-error",
-                `Not enough Energy. Lifesteal costs ${cost}.`
-            );
-
-            return;
-        }
-
-        const monsterPositions = calculateCardPositions(
-            card,
-            data?.monsterAnchor,
-            encounter.size
-        );
-
-        const healPositions = calculateCardPositions(
-            card,
-            data?.healAnchor,
-            player.gridSize
-        );
-
-        if (!monsterPositions || !healPositions) {
-            socket.emit(
-                "combat-action-error",
-                "The monster or healing pattern does not fit inside its grid."
-            );
-            return;
-        }
-
-        const hit = damageMonsterCells(room, monsterPositions, "lifesteal");
-        player.energy -= cost;
-
-        // Heal only selected EMPTY cells, capped by actual damage. No random
-        // placement and no Overheal: occupied selected cells remain unchanged.
-        const healable = healPositions.filter(
-            position => player.grid[position] === "empty"
-        );
-        const healedPositions = healable.slice(
-            0,
-            Math.min(hit.damage, healable.length)
-        );
-        healedPositions.forEach(position => {
-            player.grid[position] = "hp";
-        });
-
-        emitToPlayersAndHost(room, "player-lifesteal-resolved", {
-            playerID: player.id,
-            username: player.username,
-            cardName: card.name,
-            positions: monsterPositions,
-            healPositions: healedPositions,
-            damage: hit.damage,
-            exploded: hit.exploded.length,
-            healed: healedPositions.length,
-            energySpent: cost,
-            remainingEnergy: player.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} used Lifesteal. Damage: ${hit.damage}, Healed: ${healedPositions.length}`
-        );
-    });
-
-    /* =====================================
-       MAGE CURSE
-    ===================================== */
-
-    socket.on("player-curse", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Mage",
-            "Only Mage can use Curse cards."
-        );
-
-        if (!player) return;
-
-        const encounter = room.encounter;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "curse") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Curse card."
-            );
-
-            return;
-        }
-
-        const cost = getCardCost(card);
-
-        if (player.energy < cost) {
-            socket.emit(
-                "combat-action-error",
-                `Not enough Energy. Curse costs ${cost}.`
-            );
-
-            return;
-        }
-
-        const positions = calculateCardPositions(
-            card,
-            data?.anchor,
-            encounter.size
-        );
-
-        if (!positions) {
-            socket.emit(
-                "combat-action-error",
-                "That pattern does not fit there."
-            );
-
-            return;
-        }
-
-        // Only healthy, not-yet-cursed positions can be marked.
-        const markable = positions.filter(
-            position =>
-                encounter.grid[position] === "hp" &&
-                !encounter.curses.has(position)
-        );
-
-        if (markable.length === 0) {
-            socket.emit(
-                "combat-action-error",
-                "There is nothing to curse there. Aim at healthy, uncursed positions."
-            );
-
-            return;
-        }
-
-        markable.forEach(position => encounter.curses.add(position));
-
-        player.energy -= cost;
-
-        emitToPlayersAndHost(room, "player-curse-resolved", {
-            playerID: player.id,
-            username: player.username,
-            cardName: card.name,
-            positions: markable,
-            marked: markable.length,
-            energySpent: cost,
-            remainingEnergy: player.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} cursed ${markable.length} positions with ${card.name}`
-        );
-    });
-
-    /* =====================================
-       PLAYER HEAL
-    ===================================== */
-
-    socket.on("player-heal", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        if (!isPlayer(socket, room)) return;
-
-        const actor = room.players.get(socket.id);
-
-        if (!HEALING_CLASSES.includes(actor.className)) {
-            socket.emit(
-                "combat-action-error",
-                "Only Support and Mage can use Heal cards."
-            );
-
-            return;
-        }
-
-        const player = getActingPlayer(socket, room);
-
-        if (!player) return;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "heal") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Heal card."
-            );
-
-            return;
-        }
-
-        if (player.energy < card.targetCount) {
-            socket.emit(
-                "combat-action-error",
-                "Not enough Energy to use this card."
-            );
-
-            return;
-        }
-
-        const target = room.players.get(data?.targetPlayerID);
-
-        if (!target) {
-            socket.emit(
-                "combat-action-error",
-                "That teammate could not be found."
-            );
-
-            return;
-        }
-
-        if (isDead(target)) {
-            socket.emit(
-                "combat-action-error",
-                `${target.username} is dead and cannot be healed. Ask the Host to revive them.`
-            );
-
-            return;
-        }
-
-        const positions = calculateCardPositions(
-            card,
-            data?.anchor,
-            target.gridSize
-        );
-
-        if (!positions) {
-            socket.emit(
-                "combat-action-error",
-                "That healing pattern does not fit there."
-            );
-
-            return;
-        }
-
-        let healed = 0;
-        let overhealed = 0;
-        let unchanged = 0;
-
-        // For the heal animation.
-        const healedPositions = [];
-        const overhealedPositions = [];
-
-        positions.forEach(position => {
-            if (target.grid[position] === "empty") {
-                target.grid[position] = "hp";
-                healed++;
-                healedPositions.push(position);
-            } else if (
-                target.grid[position] === "hp" &&
-                !target.marks?.has(position)
-            ) {
-                // Retaliate-marked HP can't be Overhealed.
-                target.grid[position] = "overheal";
-                overhealed++;
-                overhealedPositions.push(position);
-            } else {
-                unchanged++;
-            }
-        });
-
-        player.energy -= card.targetCount;
-
-        emitToPlayersAndHost(room, "player-heal-resolved", {
-            playerID: player.id,
-            username: player.username,
-            targetPlayerID: target.id,
-            targetUsername: target.username,
-            cardName: card.name,
-            positions,
-            healedPositions,
-            overhealedPositions,
-            healed,
-            overhealed,
-            unchanged,
-            energySpent: card.targetCount,
-            remainingEnergy: player.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} healed ${target.username} with ${card.name}. ` +
-            `HP restored: ${healed}, Overheal added: ${overhealed}`
-        );
-    });
-
-    /* =====================================
-       SUPPORT BUFF
-    ===================================== */
-
-    socket.on("player-buff", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Support",
-            "Only Support can use Buff cards."
-        );
-
-        if (!player) return;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "buff") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Buff card."
-            );
-
-            return;
-        }
-
-        if (player.energy < card.targetCount) {
-            socket.emit(
-                "combat-action-error",
-                "Not enough Energy to use this card."
-            );
-
-            return;
-        }
-
-        const target = room.players.get(data?.targetPlayerID);
-
-        if (!target || target.id === player.id) {
-            socket.emit(
-                "combat-action-error",
-                "Choose another teammate to receive Energy."
-            );
-
-            return;
-        }
-
-        if (isDead(target)) {
-            socket.emit(
-                "combat-action-error",
-                `${target.username} is dead and cannot receive Energy. Ask the Host to revive them.`
-            );
-
-            return;
-        }
-
-        // Support pays the cost, the teammate receives the same amount.
-        player.energy -= card.targetCount;
-        target.energy += card.targetCount;
-
-        emitToPlayersAndHost(room, "player-buff-resolved", {
-            playerID: player.id,
-            username: player.username,
-            targetPlayerID: target.id,
-            targetUsername: target.username,
-            cardName: card.name,
-            energyTransferred: card.targetCount,
-            remainingEnergy: player.energy,
-            targetEnergy: target.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} buffed ${target.username} with ${card.name}. ` +
-            `Energy transferred: ${card.targetCount}`
-        );
-    });
-
-    /* =====================================
-       SUPPORT WEAKEN
-    ===================================== */
-
-    socket.on("player-weaken", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Support",
-            "Only Support can use Weaken cards."
-        );
-
-        if (!player) return;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "weaken") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Weaken card."
-            );
-
-            return;
-        }
-
-        const cost = getCardCost(card);
-
-        if (player.energy < cost) {
-            socket.emit(
-                "combat-action-error",
-                `Not enough Energy. Weaken costs ${cost}.`
-            );
-
-            return;
-        }
-
-        player.energy -= cost;
-
-        // Each Weaken point negates one monster attack position on its next roll.
-        room.weaken = (room.weaken || 0) + card.targetCount;
-
-        emitToPlayersAndHost(room, "player-weaken-resolved", {
-            playerID: player.id,
-            username: player.username,
-            cardName: card.name,
-            added: card.targetCount,
-            weaken: room.weaken,
-            energySpent: cost,
-            remainingEnergy: player.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} used Weaken. Total Weaken: ${room.weaken}`
-        );
-    });
-
-    /* =====================================
-       WARRIOR RAGE
-    ===================================== */
-
-    socket.on("player-rage", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Warrior",
-            "Only Warrior can use Rage cards.",
-            false,
-            true
-        );
-
-        if (!player) return;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "rage") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Rage card."
-            );
-
-            return;
-        }
-
-        // Rage targets the Warrior's own grid.
-        const positions = calculateCardPositions(
-            card,
-            data?.anchor,
-            player.gridSize
-        );
-
-        if (!positions) {
-            socket.emit(
-                "combat-action-error",
-                "That Rage pattern does not fit on your grid."
-            );
-
-            return;
-        }
-
-        // Every selected position must contain HP or Overheal.
-        if (
-            positions.some(position =>
-                !isHittable(player.grid[position])
-            )
-        ) {
-            socket.emit(
-                "combat-action-error",
-                "Rage can only sacrifice HP or Overheal positions."
-            );
-
-            return;
-        }
-
-        let healthSacrificed = 0;
-        let overhealSacrificed = 0;
-
-        // For the Rage animation.
-        const healthPositions = [];
-        const overhealPositions = [];
-
-        // HP is lost; Overheal is stripped back down to plain HP.
-        positions.forEach(position => {
-            if (player.grid[position] === "overheal") {
-                player.grid[position] = "hp";
-                overhealSacrificed++;
-                overhealPositions.push(position);
-            } else {
-                player.grid[position] = "empty";
-                healthSacrificed++;
-                healthPositions.push(position);
-            }
-        });
-
-        // Rage costs no Energy. Each position taken gives Energy.
-        const energyGained =
-            positions.length * RAGE_ENERGY_PER_POSITION;
-
-        player.energy += energyGained;
-
-        emitToPlayersAndHost(room, "player-rage-resolved", {
-            playerID: player.id,
-            username: player.username,
-            cardName: card.name,
-            positions,
-            healthPositions,
-            overhealPositions,
-            healthSacrificed,
-            overhealSacrificed,
-            energyGained,
-            remainingEnergy: player.energy
-        });
-
-        // Raging away your last HP is fatal, and the dead do not take turns.
-        if (isDead(player)) {
-            advanceTurn(room);
-        }
-
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} used Rage. ` +
-            `Positions taken: ${positions.length}, Energy gained: ${energyGained}`
-        );
-    });
-
-    /* =====================================
-       WARRIOR COUNTER
-    ===================================== */
-
-    socket.on("player-counter", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Warrior",
-            "Only Warrior can use Counter cards."
-        );
-
-        if (!player) return;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "counter") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Counter card."
-            );
-
-            return;
-        }
-
-        const cost = getCardCost(card);
-
-        if (player.energy < cost) {
-            socket.emit(
-                "combat-action-error",
-                `Not enough Energy. Counter costs ${cost}.`
-            );
-
-            return;
-        }
-
-        player.energy -= cost;
-
-        // Each position is one Counter Turn. Counter stacks.
-        player.counterTurns = (player.counterTurns || 0) + card.targetCount;
-
-        emitToPlayersAndHost(room, "player-counter-resolved", {
-            playerID: player.id,
-            username: player.username,
-            cardName: card.name,
-            added: card.targetCount,
-            counterTurns: player.counterTurns,
-            energySpent: cost,
-            remainingEnergy: player.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} used Counter. Counter turns: ${player.counterTurns}`
-        );
-    });
-
-    /* =====================================
-       TANK TAUNT
-    ===================================== */
-
-    socket.on("player-taunt", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Tank",
-            "Only Tank can use Taunt cards."
-        );
-
-        if (!player) return;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "taunt") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Taunt card."
-            );
-
-            return;
-        }
-
-        if (getHittablePositions(player.grid).length === 0) {
-            socket.emit(
-                "combat-action-error",
-                "You need HP remaining to activate Taunt."
-            );
-
-            return;
-        }
-
-        if (player.energy < card.targetCount) {
-            socket.emit(
-                "combat-action-error",
-                "Not enough Energy to use this Taunt card."
-            );
-
-            return;
-        }
-
-        player.energy -= card.targetCount;
-
-        // Taunt stacks: using it again adds more soaked hits.
-        if (room.taunt && room.taunt.tankID === player.id) {
-            room.taunt.remainingDamage += card.targetCount;
-        } else {
-            room.taunt = {
-                tankID: player.id,
-                tankUsername: player.username,
-                remainingDamage: card.targetCount
-            };
-        }
-
-        emitToPlayersAndHost(room, "player-taunt-resolved", {
-            playerID: player.id,
-            username: player.username,
-            cardName: card.name,
-            tauntedDamage: card.targetCount,
-            remainingDamage: room.taunt.remainingDamage,
-            energySpent: card.targetCount,
-            remainingEnergy: player.energy
-        });
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} activated Taunt. ` +
-            `Forced damage remaining: ${room.taunt?.remainingDamage}`
-        );
-    });
-
-    /* =====================================
-       TANK RETALIATE
-    ===================================== */
-
-    socket.on("player-retaliate", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        const player = getActingPlayer(
-            socket,
-            room,
-            "Tank",
-            "Only Tank can use Retaliate cards."
-        );
-
-        if (!player) return;
-
-        const card = player.cards.find(
-            item => item.id === data?.cardID
-        );
-
-        if (!card || card.type !== "retaliate") {
-            socket.emit(
-                "combat-action-error",
-                "Invalid Retaliate card."
-            );
-
-            return;
-        }
-
-        const cost = getCardCost(card);
-
-        if (player.energy < cost) {
-            socket.emit(
-                "combat-action-error",
-                "Not enough Energy to use this card."
-            );
-
-            return;
-        }
-
-        // Retaliate marks the Tank's own grid.
-        const positions = calculateCardPositions(
-            card,
-            data?.anchor,
-            player.gridSize
-        );
-
-        if (!positions) {
-            socket.emit(
-                "combat-action-error",
-                "That Retaliate pattern does not fit on your grid."
-            );
-
-            return;
-        }
-
-        // Marks only go on plain HP (never Overheal or empty), once each.
-        if (
-            positions.some(position =>
-                player.grid[position] !== "hp" ||
-                player.marks.has(position)
-            )
-        ) {
-            socket.emit(
-                "combat-action-error",
-                "Retaliate can only mark HP that is not Overheal and not already marked."
-            );
-
-            return;
-        }
-
-        positions.forEach(position => player.marks.add(position));
-
-        player.energy -= cost;
-
-        // Players see which positions were marked. The Host only sees a count.
-        emitToPlayersAndHost(
-            room,
-            "player-retaliate-resolved",
-            {
-                playerID: player.id,
-                username: player.username,
-                cardName: card.name,
-                positions,
-                marked: positions.length,
-                energySpent: cost,
-                remainingEnergy: player.energy
-            },
-            {
-                // The Host's copy: no positions and no Energy figures.
-                playerID: player.id,
-                username: player.username,
-                cardName: card.name,
-                marked: positions.length
-            }
-        );
-
-        finishPlayerAction(room, player);
-        emitTurnState(roomID);
-
-        console.log(
-            `${player.username} set ${positions.length} Retaliate marks with ${card.name}`
-        );
-    });
+    // Every card handler (player-attack, player-heal, player-rest ...)
+    // is registered by cards-server.js.
+    cards.registerSocketHandlers(socket);
 
     /* =====================================
        DISCONNECT
@@ -2936,6 +2099,14 @@ io.on("connection", socket => {
             // Remove Taunt if its Tank disconnects.
             if (room.taunt?.tankID === socket.id) {
                 room.taunt = null;
+            }
+
+            // A Shield needs both its Support and its target.
+            if (
+                room.shield?.targetID === socket.id ||
+                room.shield?.supportID === socket.id
+            ) {
+                room.shield = null;
             }
 
             room.players.delete(socket.id);

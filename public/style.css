@@ -3350,3 +3350,211 @@ body.stage-open {
         justify-content: center;
     }
 }
+
+
+/* =====================================
+   CARD OVERHAUL: ARMOR, NEGATIVE ENERGY, SHIELD, HEX
+===================================== */
+
+/* ARMOR: the Armor icon sits on top of an ordinary HP or Overheal cell. */
+.grid-cell.armor,
+.grid-cell.armor-overheal {
+    background-image: url("/assets/armor.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 74% 74%;
+}
+
+.grid-cell.armor {
+    background-color: var(--green);
+    border-color: var(--green);
+}
+
+.grid-cell.armor-overheal {
+    background-color: var(--blue);
+    border-color: var(--blue);
+}
+
+/* The same looks for the pop / fade / crack copies drawn by the animations. */
+.fx-look-armor,
+.fx-look-armor-overheal {
+    background-image: url("/assets/armor.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 74% 74%;
+}
+
+.fx-look-armor {
+    background-color: var(--green);
+    border: 1px solid var(--green);
+}
+
+.fx-look-armor-overheal {
+    background-color: var(--blue);
+    border: 1px solid var(--blue);
+}
+
+/* The diagonal flash of an Execute slash. */
+.fx-slash-line {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 160%;
+    height: 3px;
+    border-radius: 2px;
+    background: #fff;
+    box-shadow: 0 0 8px 2px rgba(255, 255, 255, 0.9);
+    transform-origin: center;
+    pointer-events: none;
+}
+
+
+/* NEGATIVE ENERGY: the grey bolt, shaking for as long as Energy is below zero. */
+.energy-icon.is-negative {
+    width: calc(var(--energy-icon-size) * 190 / 475);
+    background-image: url("/assets/zero-energy.png");
+    background-size: 100% 100%;
+    background-position: center;
+    animation: energy-negative-shake 0.22s linear infinite;
+}
+
+@keyframes energy-negative-shake {
+    0%   { transform: translate(0, 0) rotate(0deg); }
+    12%  { transform: translate(-2px, 1px) rotate(-9deg); }
+    25%  { transform: translate(2px, -1px) rotate(8deg); }
+    38%  { transform: translate(-1px, -2px) rotate(-6deg); }
+    50%  { transform: translate(2px, 2px) rotate(10deg); }
+    62%  { transform: translate(-2px, 0) rotate(-8deg); }
+    75%  { transform: translate(1px, -2px) rotate(7deg); }
+    88%  { transform: translate(-1px, 2px) rotate(-10deg); }
+    100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .energy-icon.is-negative {
+        animation: none;
+    }
+}
+
+
+/* SHIELD: a light-blue bubble around the protected player's portrait. */
+.bf-bubble {
+    position: absolute;
+    inset: -7%;
+    z-index: 3;
+    display: none;
+    box-sizing: border-box;
+    border: 5px solid #8fd3f7;
+    border-radius: 50%;
+    background: rgba(70, 150, 235, 0.3);
+    box-shadow:
+        0 0 16px 3px rgba(143, 211, 247, 0.65),
+        inset 0 0 16px 2px rgba(255, 255, 255, 0.35);
+    pointer-events: none;
+}
+
+.bf-slot.is-shielded .bf-bubble {
+    display: block;
+    animation:
+        bf-bubble-in 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.3) both,
+        bf-bubble-glow 2.2s ease-in-out 0.55s infinite;
+}
+
+@keyframes bf-bubble-in {
+    from { transform: scale(0.2); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+}
+
+@keyframes bf-bubble-glow {
+    0%, 100% { box-shadow: 0 0 14px 2px rgba(143, 211, 247, 0.55), inset 0 0 16px 2px rgba(255, 255, 255, 0.3); }
+    50%      { box-shadow: 0 0 24px 6px rgba(143, 211, 247, 0.85), inset 0 0 20px 4px rgba(255, 255, 255, 0.45); }
+}
+
+/* While the camera pushes in on a shielded player, keep it inside the box. */
+.battlefield.is-zooming {
+    overflow: hidden;
+}
+
+.bf-scene {
+    will-change: transform;
+}
+
+
+/* HEX: the icon beside a discounted cost, and the number shaking as it drops. */
+.hex-cost {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.hex-badge {
+    display: inline-block;
+    flex: none;
+    width: 1.15em;
+    height: 1.15em;
+    object-fit: contain;
+    vertical-align: middle;
+}
+
+.hex-cost-number {
+    display: inline-block;
+    min-width: 1ch;
+}
+
+.hex-cost-number.is-shaking {
+    color: #b57be8;
+    animation: hex-number-shake 0.1s linear infinite;
+}
+
+@keyframes hex-number-shake {
+    0%   { transform: translate(0, 0); }
+    25%  { transform: translate(-1.5px, 1px); }
+    50%  { transform: translate(1.5px, -1px); }
+    75%  { transform: translate(-1px, -1.5px); }
+    100% { transform: translate(0, 0); }
+}
+
+
+/* Pickers: a small reason under a player who can't be chosen (Shield). */
+.play-chip-note {
+    display: block;
+    margin-top: 2px;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    opacity: 0.8;
+}
+
+.play-overlay-empty {
+    margin: 0;
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+/* Aim colours for the new pattern cards. */
+.play-grid.play-blast .grid-cell.target-preview {
+    outline-color: #ffb36b;
+    background: rgba(224, 112, 42, 0.6);
+    box-shadow: 0 0 14px rgba(224, 112, 42, 0.7);
+}
+
+.play-grid.play-spellvamp .grid-cell.target-preview {
+    outline-color: #8fe0d8;
+    background: rgba(47, 168, 160, 0.6);
+    box-shadow: 0 0 14px rgba(47, 168, 160, 0.7);
+}
+
+/* Host: monster cells can be painted before the fight. */
+#host-monster-grid.is-editable .grid-cell {
+    cursor: pointer;
+}
+
+#host-monster-grid.is-editable .grid-cell:hover {
+    outline: 2px solid #f5c400;
+    outline-offset: -2px;
+}
+
+.monster-setup-hint {
+    margin: 6px 0 0;
+    font-size: 11px;
+    opacity: 0.8;
+}
