@@ -229,9 +229,7 @@ let playerGridSize = 3;
 let playerGridCells = Array(9).fill("hp");
 
 let currentEncounter = null;
-let monsterAttackRoll = null;
 
-let selectedTargetPositions = new Set();
 
 function isMyTurn() {
     const turn = currentEncounter?.currentTurn;
@@ -381,7 +379,6 @@ function renderHostLobby() {
     });
 
     updateAssignmentPlayerOptions();
-    updateMonsterTargetOptions();
     renderHostPartyGrids();
 }
 
@@ -1222,7 +1219,6 @@ const combatCardsContainer = document.getElementById("combat-cards");
 const combatCardMessage = document.getElementById("combat-card-message");
 
 const heartGrid = document.getElementById("heart-grid");
-const monsterGrid = document.getElementById("monster-grid");
 
 const partyGrids = document.getElementById("party-grids");
 const hostPartyGrids = document.getElementById("host-party-grids");
@@ -1283,9 +1279,24 @@ function refreshCombatStatusLine() {
 
     if (currentEncounter.active && currentEncounter.taunt) {
         text +=
-            ` · TAUNT: the monster must hit ${currentEncounter.taunt.tankUsername} ` +
+            ` · TAUNT: the monsters must hit ${currentEncounter.taunt.tankUsername} ` +
             `(${currentEncounter.taunt.remainingDamage} hit(s) left)`;
     }
+
+    // A Monster's Taunt: players must aim cards at it first.
+    (currentEncounter.monsters || []).forEach(monster => {
+        if (currentEncounter.active && monster.taunt > 0 && !monster.dead) {
+            text +=
+                ` · ${monster.name.toUpperCase()} TAUNT: aim ${monster.taunt} more ` +
+                `card${monster.taunt === 1 ? "" : "s"} at it`;
+        }
+    });
+
+    (currentEncounter.devilCounters || []).forEach(counter => {
+        text +=
+            ` · ${counter.monsterName.toUpperCase()}'S COUNTER on ${counter.username}: ` +
+            `${counter.turns} turn(s)`;
+    });
 
     if (currentRole === "player") {
         const mine = describePlayerCardEffects({
@@ -1299,11 +1310,16 @@ function refreshCombatStatusLine() {
     }
 
     if (currentEncounter.active && currentEncounter.hex) {
-        text += ` · HEX: Attack and Blast cost 1 less for ${currentEncounter.hex.remaining} monster turn(s)`;
+        text += ` · HEX: Attack, Blast, Spellvamp and Curse cost 2 less for ${currentEncounter.hex.remaining} monster turn(s)`;
     }
 
     if (currentRole === "player" && myCounterTurns > 0) {
-        text += ` · COUNTER READY: ${myCounterTurns} turn(s)`;
+        const mine = roomPlayers.find(player => player.id === currentPlayerID);
+        const against = Object.entries(mine?.counters || {})
+            .map(([id, turns]) => `${getMonsterByID(id)?.name || "Monster"} ×${turns}`)
+            .join(", ");
+
+        text += ` · COUNTER READY: ${myCounterTurns} turn(s)` + (against ? ` (${against})` : "");
     }
 
     if ((currentEncounter.weaken || 0) > 0) {
@@ -1311,7 +1327,15 @@ function refreshCombatStatusLine() {
     }
 
     if (currentEncounter.currentTurn?.counter && currentEncounter.currentTurn.id === currentPlayerID) {
-        text += " · COUNTER TURN: bonus Warrior action (no Energy regeneration)";
+        const locked = getMonsterByID(currentEncounter.currentTurn.counterMonsterID);
+
+        text += " · COUNTER TURN: bonus Warrior action (no Energy regeneration)" +
+            (locked ? `, locked onto ${locked.name}` : "");
+    }
+
+    if (currentEncounter.currentTurn?.bonus) {
+        text += ` · ${currentEncounter.currentTurn.username.toUpperCase()} BONUS ACTION ` +
+            "(Counter): restricted attack only";
     }
 
     if (
@@ -1511,41 +1535,6 @@ function clearCombatTargetPreview() {
 
 
 /* =====================================
-   MONSTER TARGET PREVIEW
-===================================== */
-
-function updateCombatTargetPreview(anchor) {
-    clearCombatTargetPreview();
-
-    if (
-        !selectedCombatCard ||
-        getCardPlayMode(selectedCombatCard) !== "monster" ||
-        !currentEncounter ||
-        combatAttackPending
-    ) {
-        return;
-    }
-
-    hoveredMonsterAnchor = anchor;
-
-    const positions = getCardTargetPositions(
-        selectedCombatCard,
-        anchor,
-        currentEncounter.size
-    );
-
-    if (!positions) {
-        monsterGrid.children[anchor]?.classList.add("target-invalid");
-        return;
-    }
-
-    positions.forEach(position => {
-        monsterGrid.children[position]?.classList.add("target-preview");
-    });
-}
-
-
-/* =====================================
    HEAL / RAGE TARGET PREVIEW
 ===================================== */
 
@@ -1584,63 +1573,8 @@ function updateHealTargetPreview(anchor, gridSize, gridContainer) {
 
 
 /* =====================================
-   RENDER COMBAT MONSTER GRID
-===================================== */
-
-function renderCombatMonsterGrid() {
-    if (!currentEncounter || !monsterGrid) return;
-
-    const isMonsterPatternTarget =
-        currentRole === "player" &&
-        Boolean(selectedCombatCard) &&
-        getCardPlayMode(selectedCombatCard) === "monster" &&
-        currentEncounter.active &&
-        !combatAttackPending;
-
-    monsterGrid.classList.toggle("targeting", isMonsterPatternTarget);
-    monsterGrid.classList.toggle(
-        "curse-targeting",
-        isMonsterPatternTarget && selectedCombatCard?.type === "curse"
-    );
-
-    renderGrid(
-        monsterGrid,
-        currentEncounter.grid,
-        currentEncounter.size,
-        {
-            interactive: isMonsterPatternTarget,
-            curses: new Set(currentEncounter.curses || []),
-            fxKey: "monster",
-
-            onHover: index => {
-                updateCombatTargetPreview(index);
-            },
-
-            onClick: index => {
-                confirmCardPlacement(index);
-            }
-        }
-    );
-
-    if (
-        isMonsterPatternTarget &&
-        hoveredMonsterAnchor !== null
-    ) {
-        updateCombatTargetPreview(hoveredMonsterAnchor);
-    }
-}
-
-
-/* =====================================
    LEAVE GRIDS
 ===================================== */
-
-monsterGrid?.addEventListener("mouseleave", () => {
-    if (!selectedCombatCard || getCardPlayMode(selectedCombatCard) !== "monster") return;
-
-    hoveredMonsterAnchor = null;
-    clearCombatTargetPreview();
-});
 
 heartGrid?.addEventListener("mouseleave", () => {
     if (!selectedCombatCard || !["heal", "self"].includes(getCardPlayMode(selectedCombatCard))) return;
@@ -1693,43 +1627,6 @@ socket.on("counter-turn-started", result => {
     } else if (currentRole === "host") {
         monsterEncounterMessage.textContent = message;
     }
-});
-
-socket.on("monster-weakened", result => {
-    const message = result.skipped
-        ? `${result.monsterName}'s attack was fully weakened. The monster skips its turn!`
-        : `${result.monsterName}'s attack was reduced from ${result.roll} to ${result.effective}. ` +
-          `${result.positionsNegated ?? result.absorbed} monster attack position(s) negated; ` +
-          `${result.weakenLeft} Weaken remains.`;
-
-    if (currentRole === "player") {
-        combatCardMessage.textContent = message;
-    } else if (currentRole === "host") {
-        monsterEncounterMessage.textContent = message;
-
-        if (result.skipped) {
-            // Whole roll negated: nothing to target, so clear the roll UI.
-            monsterAttackRoll = null;
-            selectedTargetPositions.clear();
-            monsterD10Result.textContent = "?";
-            monsterAttackMessage.textContent = message;
-        } else {
-            monsterAttackMessage.textContent =
-                `${message} Select a player and up to ${result.effective} target positions.`;
-        }
-    }
-});
-
-
-socket.on("monster-attack-resolved", result => {
-    if (currentRole !== "player") return;
-
-    combatCardMessage.textContent =
-        `The monster hit ${result.username} for ` +
-        `${result.positions.length} position(s).` +
-        (result.tauntRemaining === 0 ? " The Taunt has ended." : "");
-
-    clearCombatTargetPreview();
 });
 
 
@@ -2189,91 +2086,16 @@ socket.on("party-update", players => {
 
     if (currentRole === "host") {
         renderHostPartyGrids();
-        updateMonsterTargetOptions();
-    }
+        }
 });
 
-
-/* =====================================
-   HOST: MONSTER ENCOUNTER
-===================================== */
-
-const monsterNameInput = document.getElementById("monster-name");
-const monsterGridSizeSelect = document.getElementById("monster-grid-size");
-
-const createEncounterButton =
-    document.getElementById("create-encounter-button");
-
-const monsterEncounterInfo =
-    document.getElementById("monster-encounter-info");
-
-const activeMonsterName =
-    document.getElementById("active-monster-name");
-
-const monsterEncounterStatus =
-    document.getElementById("monster-encounter-status");
-
-const monsterEncounterMessage =
-    document.getElementById("monster-encounter-message");
-
-const startEncounterButton =
-    document.getElementById("start-encounter-button");
-
-const endEncounterButton =
-    document.getElementById("end-encounter-button");
-
-const hostMonsterGrid =
-    document.getElementById("host-monster-grid");
-
-
-createEncounterButton?.addEventListener("click", () => {
-    const name = monsterNameInput.value.trim();
-    const size = Number(monsterGridSizeSelect.value);
-
-    if (!name) {
-        monsterEncounterMessage.textContent =
-            "Enter a monster name.";
-
-        return;
-    }
-
-    createEncounterButton.disabled = true;
-    monsterEncounterMessage.textContent = "Creating encounter...";
-
-    socket.emit("create-encounter", {
-        name,
-        size
-    });
-});
-
-
-socket.on("encounter-created", message => {
-    monsterEncounterMessage.textContent = message;
-
-    monsterNameInput.disabled = true;
-    monsterGridSizeSelect.disabled = true;
-
-    createEncounterButton.textContent = "ENCOUNTER CREATED";
-});
-
-
-socket.on("encounter-error", message => {
-    monsterEncounterMessage.textContent = message;
-    createEncounterButton.disabled = false;
-});
-
-
-/* =====================================
-   ENCOUNTER STATE
-===================================== */
-
-const combatStatus = document.getElementById("combat-status");
-const combatMonsterName = document.getElementById("combat-monster-name");
-const combatMonsterStatus = document.getElementById("combat-monster-status");
 
 /* =====================================
    COMBAT ORDER — NATURAL + BONUS TURNS
 ===================================== */
+
+// The "COMBAT IN PROGRESS" line. (Monster state itself is in monster.js.)
+const combatStatus = document.getElementById("combat-status");
 
 function ensureCombatOrderUI() {
     if (!combatStatus) return null;
@@ -2432,72 +2254,72 @@ function renderCombatOrder() {
     list.replaceChildren();
 
     const current = currentEncounter.currentTurn;
-    const activeCounterID = current?.counter ? current.id : null;
-    const counterWarrior = roomPlayers.find(
-        player => player.className === "Warrior" &&
-            ((player.counterTurns || 0) > 0 || player.id === activeCounterID)
-    ) || (activeCounterID ? {
-        id: activeCounterID,
-        username: current?.username || "Warrior",
-        className: "Warrior",
-        counterTurns: 0
-    } : null);
+    const counterPlayers = currentEncounter.counterPlayers || [];
 
-    let bonusInserted = false;
+    // Bonus slot right after the Monster whose turn the Warrior is waiting on.
+    const addCounterEntries = monsterID => {
+        counterPlayers.forEach(warrior => {
+            const waiting = warrior.counters?.[monsterID] || 0;
+            const isActive = Boolean(
+                warrior.active &&
+                current?.counter &&
+                current.counterMonsterID === monsterID
+            );
 
-    const addCounterEntry = () => {
-        if (bonusInserted || !counterWarrior) return;
-        bonusInserted = true;
+            // The server consumes a stored Counter when the bonus turn begins.
+            const total = waiting + (isActive ? 1 : 0);
 
-        const isActive = activeCounterID === counterWarrior.id;
-        // The server consumes a stored Counter when the bonus turn begins.
-        // Add the active turn back so the displayed count includes it.
-        const totalTurns = Math.max(
-            0,
-            (counterWarrior.counterTurns || 0) + (isActive ? 1 : 0)
-        );
-        if (totalTurns <= 0) return;
+            if (total <= 0) return;
 
-        const item = document.createElement("li");
-        item.className = "combat-order-item is-bonus";
-        if (isActive) item.classList.add("is-active");
+            const item = document.createElement("li");
+            item.className = "combat-order-item is-bonus";
+            if (isActive) item.classList.add("is-active");
 
-        const number = document.createElement("span");
-        number.className = "combat-order-number";
-        number.textContent = "#";
+            const number = document.createElement("span");
+            number.className = "combat-order-number";
+            number.textContent = "#";
 
-        const copy = document.createElement("span");
-        copy.className = "combat-order-copy";
+            const copy = document.createElement("span");
+            copy.className = "combat-order-copy";
 
-        const name = document.createElement("span");
-        name.className = "combat-order-name";
-        name.textContent = counterWarrior.username || "Warrior";
+            const name = document.createElement("span");
+            name.className = "combat-order-name";
+            name.textContent = warrior.username || "Warrior";
 
-        const detail = document.createElement("span");
-        detail.className = "combat-order-class";
-        detail.textContent = "Warrior · Combat Turn";
+            const detail = document.createElement("span");
+            detail.className = "combat-order-class";
+            detail.textContent =
+                `Warrior · Counter vs ${getMonsterByID(monsterID)?.name || "Monster"}`;
 
-        const count = document.createElement("span");
-        count.className = "combat-order-count";
-        count.textContent = `${totalTurns} Combat Turn${totalTurns === 1 ? "" : "s"}`;
+            const count = document.createElement("span");
+            count.className = "combat-order-count";
+            count.textContent = `${total} Combat Turn${total === 1 ? "" : "s"}`;
 
-        copy.append(name, detail);
-        item.append(number, copy, count);
-        list.appendChild(item);
+            copy.append(name, detail);
+            item.append(number, copy, count);
+            list.appendChild(item);
+        });
     };
 
-    order.forEach((participant, index) => {
+    order.forEach(participant => {
         const item = document.createElement("li");
         item.className = "combat-order-item";
+
+        const monster = participant.type === "monster"
+            ? getMonsterByID(participant.id)
+            : null;
 
         const isActive = !current?.counter &&
             current?.type === participant.type &&
             current?.id === participant.id;
+
         if (isActive) item.classList.add("is-active");
+
+        if (monster?.dead) item.classList.add("is-dead");
 
         const number = document.createElement("span");
         number.className = "combat-order-number";
-        number.textContent = String(index + 1);
+        number.textContent = String(participant.initiative);
 
         const copy = document.createElement("span");
         copy.className = "combat-order-copy";
@@ -2509,714 +2331,43 @@ function renderCombatOrder() {
         const playerClass = document.createElement("span");
         playerClass.className = "combat-order-class";
         playerClass.textContent = participant.type === "monster"
-            ? "Monster"
+            ? `${participant.className} · Monster`
             : participant.className;
 
         copy.append(name, playerClass);
         item.append(number, copy);
         list.appendChild(item);
 
-        // Counter is a bonus slot immediately after the Monster's turn.
-        if (participant.type === "monster") addCounterEntry();
-    });
+        if (participant.type === "monster") {
+            // A Devil's Counter bonus action shows under that Devil.
+            if (current?.bonus && current.id === participant.id) {
+                const bonus = document.createElement("li");
+                bonus.className = "combat-order-item is-bonus is-active";
 
-    // Defensive fallback in case a future encounter format omits the Monster row.
-    addCounterEntry();
-}
+                const mark = document.createElement("span");
+                mark.className = "combat-order-number";
+                mark.textContent = "↳";
 
-/* =====================================
-   MONSTER'S EFFECTS
-===================================== */
+                const text = document.createElement("span");
+                text.className = "combat-order-copy";
 
-/*
-    Right under Turn Order, for the Host and for players.
-    Taunt, Weaken and Status are Charges; Counter, Hex and Shield are Turns
-    (Hex and Shield count monster turns).
-    Icon + number only (the words are in the tooltip / screen-reader label).
-*/
-const MONSTER_EFFECT_TYPES = [
-    { key: "taunt", label: "Taunt", unit: "Charge" },
-    { key: "weaken", label: "Weaken", unit: "Charge" },
-    { key: "counter", label: "Counter", unit: "Turn" },
-    { key: "status", label: "Status", unit: "Charge" },
-    { key: "hex", label: "Hex", unit: "Turn" },
-    { key: "shield", label: "Shield", unit: "Turn" }
-];
+                const bonusName = document.createElement("span");
+                bonusName.className = "combat-order-name";
+                bonusName.textContent = `${participant.username} — BONUS`;
 
-function ensureMonsterEffectsPanels() {
-    if (!document.getElementById("monster-effects-styles")) {
-        const style = document.createElement("style");
-        style.id = "monster-effects-styles";
-        style.textContent = `
-            .monster-effects-panel {
-                margin: 12px 0 16px;
-                padding: 12px;
-                border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
-                border-radius: 10px;
-                background: var(--surface, rgba(128, 128, 128, 0.06));
-            }
-            .monster-effects-panel .monster-effects-heading {
-                margin: 0 0 9px;
-                font-size: 10px;
-                font-weight: 800;
-                letter-spacing: 1.5px;
-                opacity: 0.7;
-            }
-            .monster-effects-panel .monster-effects-list {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 10px;
-                min-height: 40px;
-                align-items: center;
-            }
-            .monster-effects-panel .monster-effect {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                padding: 6px 12px 6px 8px;
-                border: 1px solid rgba(128, 128, 128, 0.3);
-                border-radius: 8px;
-                background: rgba(128, 128, 128, 0.05);
-            }
-            .monster-effects-panel .monster-effect img {
-                width: 40px;
-                height: 40px;
-                object-fit: contain;
-            }
-            .monster-effects-panel .monster-effect-count {
-                min-width: 14px;
-                font-size: 20px;
-                font-weight: 800;
-                line-height: 1;
-                text-align: center;
-            }
-            .monster-effects-panel .monster-effect.just-changed {
-                animation: monster-effect-bump 0.35s ease;
-            }
-            .monster-effects-panel .monster-effects-empty {
-                margin: 0;
-                font-size: 11px;
-                opacity: 0.55;
-            }
-            @keyframes monster-effect-bump {
-                0% { transform: scale(1); }
-                40% { transform: scale(1.12); }
-                100% { transform: scale(1); }
-            }
-        `;
-        document.head.appendChild(style);
-    }
+                const bonusDetail = document.createElement("span");
+                bonusDetail.className = "combat-order-class";
+                bonusDetail.textContent = "Counter bonus action · restricted";
 
-    const placements = [
-        // Players: right under their Turn Order panel.
-        {
-            id: "player-monster-effects",
-            anchor: document.getElementById("combat-order-panel")
-        },
-        // Host: right under the initiative list.
-        {
-            id: "host-monster-effects",
-            anchor: document.getElementById("host-initiative-list")
-        }
-    ];
-
-    placements.forEach(({ id, anchor }) => {
-        if (!anchor || document.getElementById(id)) return;
-
-        const panel = document.createElement("section");
-        panel.id = id;
-        panel.className = "monster-effects-panel";
-        panel.hidden = true;
-
-        const heading = document.createElement("h3");
-        heading.className = "monster-effects-heading";
-        heading.textContent = "MONSTER'S EFFECTS";
-
-        const list = document.createElement("div");
-        list.className = "monster-effects-list";
-
-        panel.append(heading, list);
-        anchor.insertAdjacentElement("afterend", panel);
-    });
-}
-
-const previousMonsterEffects = {};
-
-function renderMonsterEffects() {
-    ensureCombatOrderUI();
-    ensureMonsterEffectsPanels();
-
-    const effects = currentEncounter?.effects || {};
-    const show = Boolean(currentEncounter?.active);
-
-    ["player-monster-effects", "host-monster-effects"].forEach(id => {
-        const panel = document.getElementById(id);
-
-        if (!panel) return;
-
-        panel.hidden = !show;
-
-        const list = panel.querySelector(".monster-effects-list");
-
-        list.replaceChildren();
-
-        if (!show) return;
-
-        let shown = 0;
-
-        MONSTER_EFFECT_TYPES.forEach(type => {
-            const amount = effects[type.key] || 0;
-
-            if (amount <= 0) return;
-
-            shown++;
-
-            const item = document.createElement("div");
-            item.className = "monster-effect";
-
-            const text =
-                `${type.label}: ${amount} ${type.unit}${amount === 1 ? "" : "s"}`;
-
-            item.title = text;
-            item.setAttribute("aria-label", text);
-
-            if (
-                previousMonsterEffects[type.key] !== undefined &&
-                previousMonsterEffects[type.key] !== amount
-            ) {
-                item.classList.add("just-changed");
+                text.append(bonusName, bonusDetail);
+                bonus.append(mark, text);
+                list.appendChild(bonus);
             }
 
-            const icon = document.createElement("img");
-            icon.src = `/assets/${type.key}.png`;
-            icon.alt = "";
-
-            const count = document.createElement("span");
-            count.className = "monster-effect-count";
-            count.textContent = String(amount);
-
-            item.append(icon, count);
-            list.appendChild(item);
-        });
-
-        if (shown === 0) {
-            const empty = document.createElement("p");
-            empty.className = "monster-effects-empty";
-            empty.textContent = "None active";
-            list.appendChild(empty);
+            addCounterEntries(participant.id);
         }
     });
-
-    // Hex changes what Attack and Blast cost, so redraw the cards.
-    const hadHex = (previousMonsterEffects.hex || 0) > 0;
-    const hexChanged = (previousMonsterEffects.hex || 0) !== (effects.hex || 0);
-
-    MONSTER_EFFECT_TYPES.forEach(type => {
-        previousMonsterEffects[type.key] = effects[type.key] || 0;
-    });
-
-    if (hexChanged && currentRole === "player") {
-        // A Hex that has just started makes the costs count down on screen.
-        if ((previousMonsterEffects.hex || 0) > 0 && !(hadHex)) {
-            hexCostAnimationUntil = performance.now() + 600;
-        }
-
-        renderSavedCards();
-        renderCombatCards();
-    }
 }
-
-socket.on("encounter-state", encounter => {
-    currentEncounter = encounter;
-
-    if (!encounter) {
-        monsterEncounterInfo.hidden = true;
-
-        combatMonsterName.textContent = "No monster";
-        combatMonsterStatus.textContent = "No active encounter.";
-
-        combatStatus.textContent =
-            "Waiting for an encounter...";
-
-        cancelCardTargeting(false);
-        renderGrid(monsterGrid, [], 3);
-        renderCombatOrder();
-        renderMonsterEffects();
-
-        return;
-    }
-
-    // Leftover positions are forfeited when the monster's turn ends.
-    if (
-        currentRole === "host" &&
-        monsterAttackRoll !== null &&
-        (!encounter.active || encounter.currentTurn?.type !== "monster")
-    ) {
-        monsterAttackRoll = null;
-        selectedTargetPositions.clear();
-        monsterD10Result.textContent = "?";
-        monsterTargetPlayer.value = "";
-        renderHostTargetGrid();
-    }
-
-    activeMonsterName.textContent = encounter.name;
-    combatMonsterName.textContent = encounter.name;
-
-    monsterEncounterInfo.hidden = false;
-
-    monsterEncounterStatus.textContent =
-        encounter.active
-            ? "Encounter in progress."
-            : "Encounter ready.";
-
-    combatMonsterStatus.textContent =
-        encounter.active
-            ? "Monster is active."
-            : "Encounter has not started.";
-
-    refreshCombatStatusLine();
-    renderMonsterEffects();
-
-    if (!encounter.active) {
-        cancelCardTargeting(false);
-    }
-
-    // If it stopped being my turn, drop any half-aimed card.
-    if (
-        currentRole === "player" &&
-        selectedCombatCard &&
-        !combatAttackPending &&
-        !isMyTurn()
-    ) {
-        cancelCardTargeting(false);
-    }
-
-    // Before the fight the Host can paint Overheal and Armor onto the
-    // monster: click a cell to cycle HP -> Armor -> Overheal -> Armor over Overheal.
-    const hostCanPaint = currentRole === "host" && !encounter.active;
-
-    hostMonsterGrid.classList.toggle("is-editable", hostCanPaint);
-
-    const paintHint = document.getElementById("monster-setup-hint");
-    if (paintHint) paintHint.hidden = !hostCanPaint;
-
-    renderGrid(
-        hostMonsterGrid,
-        encounter.grid,
-        encounter.size,
-        {
-            curses: new Set(encounter.curses || []),
-            fxKey: "monster",
-            interactive: hostCanPaint,
-            onClick: index => {
-                const order = ["hp", "armor", "overheal", "armor-overheal"];
-                const current = order.indexOf(encounter.grid[index]);
-                const next = order[(current + 1) % order.length];
-
-                socket.emit("edit-monster-cell", { index, state: next });
-            }
-        }
-    );
-
-    renderCombatMonsterGrid();
-
-    renderPlayerGrid();
-    renderPlayerPartyGrids();
-
-    startEncounterButton.disabled = encounter.active;
-    endEncounterButton.disabled = !encounter.active;
-
-    createEncounterButton.disabled = encounter.active;
-
-    if (!encounter.active) {
-        createEncounterButton.disabled = false;
-        createEncounterButton.textContent = "CREATE NEW ENCOUNTER";
-
-        monsterNameInput.disabled = false;
-        monsterGridSizeSelect.disabled = false;
-    }
-
-    if (currentRole === "host") {
-        applyTauntToTargetSelection();
-        refreshTauntBanner();
-    }
-
-    updateMonsterAttackControls();
-});
-
-
-/* =====================================
-   HOST: START / END ENCOUNTER
-===================================== */
-
-startEncounterButton?.addEventListener("click", () => {
-    socket.emit("start-encounter");
-});
-
-endEncounterButton?.addEventListener("click", () => {
-    socket.emit("end-encounter");
-});
-
-
-/* =====================================
-   HOST: D10 ATTACK CONTROLS
-===================================== */
-
-const rollMonsterD10Button =
-    document.getElementById("roll-monster-d10-button");
-
-const monsterD10Result =
-    document.getElementById("monster-d10-result");
-
-const monsterTargetPlayer =
-    document.getElementById("monster-target-player");
-
-const monsterTargetCount =
-    document.getElementById("monster-target-count");
-
-const hostTargetGrid =
-    document.getElementById("host-target-grid");
-
-const confirmMonsterAttackButton =
-    document.getElementById("confirm-monster-attack-button");
-
-const monsterAttackMessage =
-    document.getElementById("monster-attack-message");
-
-
-/* ---------- Taunt banner (Host) ---------- */
-
-const tauntBanner = document.createElement("p");
-
-tauntBanner.className = "taunt-banner";
-tauntBanner.hidden = true;
-
-rollMonsterD10Button?.parentElement?.insertBefore(
-    tauntBanner,
-    rollMonsterD10Button.previousElementSibling
-);
-
-
-function getActiveTauntTank() {
-    const taunt = currentEncounter?.taunt;
-
-    // Paused (the Tank is resting or Shielded): the monster is free.
-    if (!taunt || taunt.paused) return null;
-
-    const tank = roomPlayers.find(player => player.id === taunt.tankID);
-
-    if (!tank) return null;
-
-    const hasHealth = tank.grid.some(
-        cell => cell === "hp" || cell === "overheal"
-    );
-
-    return hasHealth ? tank : null;
-}
-
-
-function refreshTauntBanner() {
-    const tank = getActiveTauntTank();
-
-    if (!tank || !currentEncounter?.active) {
-        tauntBanner.hidden = true;
-        return;
-    }
-
-    tauntBanner.hidden = false;
-
-    tauntBanner.textContent =
-        `TAUNT ACTIVE: the monster must target ${tank.username} ` +
-        `for ${currentEncounter.taunt.remainingDamage} more hit(s).`;
-}
-
-
-// When Taunt is active the Tank is the only legal target.
-function applyTauntToTargetSelection() {
-    if (!monsterTargetPlayer) return;
-
-    const tank = getActiveTauntTank();
-
-    if (!tank || monsterAttackRoll === null) return;
-
-    if (monsterTargetPlayer.value !== tank.id) {
-        monsterTargetPlayer.value = tank.id;
-        selectedTargetPositions.clear();
-        renderHostTargetGrid();
-    }
-}
-
-
-rollMonsterD10Button?.addEventListener("click", () => {
-    socket.emit("roll-monster-d10");
-
-    rollMonsterD10Button.disabled = true;
-    monsterAttackMessage.textContent = "Rolling...";
-});
-
-
-socket.on("monster-d10-result", result => {
-    monsterAttackRoll = result;
-
-    selectedTargetPositions.clear();
-
-    monsterD10Result.textContent = result;
-
-    const tank = getActiveTauntTank();
-
-    monsterAttackMessage.textContent = tank
-        ? `The monster rolled ${result}. Taunt forces it to hit ${tank.username} ` +
-          `(max ${Math.min(result, currentEncounter.taunt.remainingDamage)} positions).`
-        : `The monster rolled ${result}. Select a player and up to ${result} target positions.`;
-
-    updateMonsterTargetOptions();
-    applyTauntToTargetSelection();
-    renderHostTargetGrid();
-    updateMonsterAttackControls();
-});
-
-
-function updateMonsterTargetOptions() {
-    if (!monsterTargetPlayer) return;
-
-    const previousValue = monsterTargetPlayer.value;
-
-    monsterTargetPlayer.innerHTML = "";
-
-    const placeholder = document.createElement("option");
-
-    placeholder.value = "";
-    placeholder.textContent = "Select a player";
-
-    monsterTargetPlayer.appendChild(placeholder);
-
-    roomPlayers.forEach(player => {
-        const option = document.createElement("option");
-
-        option.value = player.id;
-
-        const dead = isDeadPlayer(player);
-
-        option.textContent =
-            `${player.username} (${player.className})` +
-            `${dead ? " · DEAD" : ""}${player.shielded ? " · SHIELDED" : ""}`;
-
-        option.disabled = dead || Boolean(player.shielded);
-
-        monsterTargetPlayer.appendChild(option);
-    });
-
-    if (roomPlayers.some(player => player.id === previousValue)) {
-        monsterTargetPlayer.value = previousValue;
-    }
-
-    monsterTargetPlayer.disabled =
-        !currentEncounter?.active ||
-        monsterAttackRoll === null ||
-        roomPlayers.length === 0 ||
-        Boolean(getActiveTauntTank());
-
-    refreshTauntBanner();
-}
-
-
-monsterTargetPlayer?.addEventListener("change", () => {
-    selectedTargetPositions.clear();
-
-    renderHostTargetGrid();
-    updateMonsterAttackControls();
-});
-
-
-function getSelectedTargetPlayer() {
-    return roomPlayers.find(
-        player => player.id === monsterTargetPlayer.value
-    );
-}
-
-
-/*
-    The D10 roll is a MAXIMUM number of positions.
-    The host may choose anywhere from 1 up to this number,
-    and can only choose cells that can actually be hit
-    (HP or Overheal), so a player with few hearts left
-    can't dodge by having the monster waste hits on empty cells.
-
-    If the selected player is the taunting Tank, the number is also
-    capped by how much Taunt is left.
-*/
-function getMaxMonsterTargets() {
-    const player = getSelectedTargetPlayer();
-
-    if (!player || monsterAttackRoll === null) return 0;
-
-    const hittable = player.grid.filter(
-        cell => cell === "hp" || cell === "overheal"
-    ).length;
-
-    let max = Math.min(monsterAttackRoll, hittable);
-
-    const taunt = currentEncounter?.taunt;
-
-    if (taunt && !taunt.paused && taunt.tankID === player.id) {
-        max = Math.min(max, taunt.remainingDamage);
-    }
-
-    return max;
-}
-
-
-/* =====================================
-   HOST: SELECT MONSTER TARGET POSITIONS
-===================================== */
-
-function renderHostTargetGrid() {
-    const player = getSelectedTargetPlayer();
-
-    if (!player) {
-        hostTargetGrid.innerHTML = "";
-        return;
-    }
-
-    renderGrid(
-        hostTargetGrid,
-        player.grid,
-        player.gridSize,
-        {
-            interactive: monsterAttackRoll !== null,
-            selected: selectedTargetPositions,
-
-            onClick: index => {
-                const max = getMaxMonsterTargets();
-                const cell = player.grid[index];
-
-                // Empty cells can't be hit.
-                if (cell !== "hp" && cell !== "overheal") return;
-
-                if (selectedTargetPositions.has(index)) {
-                    selectedTargetPositions.delete(index);
-                } else if (selectedTargetPositions.size < max) {
-                    selectedTargetPositions.add(index);
-                }
-
-                renderHostTargetGrid();
-                updateMonsterAttackControls();
-            }
-        }
-    );
-}
-
-
-function updateMonsterAttackControls() {
-    const hasActiveEncounter =
-        Boolean(currentEncounter?.active);
-
-    const hasRoll =
-        monsterAttackRoll !== null;
-
-    const player = getSelectedTargetPlayer();
-
-    const max = getMaxMonsterTargets();
-    const selected = selectedTargetPositions.size;
-
-    const turn = currentEncounter?.currentTurn;
-    const isMonsterTurn = turn?.type === "monster";
-
-    rollMonsterD10Button.disabled =
-        !hasActiveEncounter ||
-        !isMonsterTurn ||
-        Boolean(currentEncounter?.monsterHasActed) ||
-        hasRoll;
-
-    monsterTargetPlayer.disabled =
-        !hasActiveEncounter ||
-        !hasRoll ||
-        roomPlayers.length === 0 ||
-        Boolean(getActiveTauntTank());
-
-    monsterTargetCount.textContent =
-        hasRoll
-            ? `Positions selected: ${selected} (up to ${max})`
-            : "Positions remaining: 0";
-
-    confirmMonsterAttackButton.disabled =
-        !hasActiveEncounter ||
-        !player ||
-        !hasRoll ||
-        selected < 1 ||
-        selected > max;
-}
-
-
-confirmMonsterAttackButton?.addEventListener("click", () => {
-    const player = getSelectedTargetPlayer();
-    const max = getMaxMonsterTargets();
-
-    if (
-        !player ||
-        monsterAttackRoll === null ||
-        selectedTargetPositions.size < 1 ||
-        selectedTargetPositions.size > max
-    ) {
-        return;
-    }
-
-    socket.emit("monster-attack", {
-        playerID: player.id,
-        positions: Array.from(selectedTargetPositions)
-    });
-
-    confirmMonsterAttackButton.disabled = true;
-    monsterAttackMessage.textContent = "Resolving monster attack...";
-});
-
-
-socket.on("monster-attack-error", message => {
-    monsterAttackMessage.textContent = message;
-    updateMonsterAttackControls();
-});
-
-
-socket.on("monster-attack-resolved", result => {
-    if (currentRole !== "host") return;
-
-    selectedTargetPositions.clear();
-
-    const attackText =
-        `${result.username} was attacked at ${result.positions.length} position(s).` +
-        (result.tauntRemaining === 0 ? " The Taunt has ended." : "");
-
-    if (result.remaining > 0) {
-        // Part of the roll is still unspent: keep attacking.
-        monsterAttackRoll = result.remaining;
-
-        monsterD10Result.textContent = result.remaining;
-        monsterTargetPlayer.value = "";
-
-        monsterAttackMessage.textContent =
-            `${attackText} ${result.remaining} position(s) left to use.`;
-
-        updateMonsterTargetOptions();
-
-        // Only re-lock onto the Tank if the Taunt is still going.
-        if (result.tauntRemaining > 0) {
-            applyTauntToTargetSelection();
-        }
-    } else {
-        monsterAttackRoll = null;
-
-        monsterD10Result.textContent = "?";
-        monsterTargetPlayer.value = "";
-
-        monsterAttackMessage.textContent = attackText;
-
-        updateMonsterTargetOptions();
-    }
-
-    renderHostTargetGrid();
-    updateMonsterAttackControls();
-});
-
 
 /* =====================================
    ROOM CLOSED
@@ -3238,9 +2389,6 @@ socket.on("room-closed", () => {
     myShieldBreak = 0;
 
     currentEncounter = null;
-    monsterAttackRoll = null;
-
-    selectedTargetPositions.clear();
 
     selectedCombatCard = null;
 
@@ -3252,7 +2400,6 @@ socket.on("room-closed", () => {
 
     healTargetContainer.hidden = true;
     cardTypeContainer.hidden = true;
-    tauntBanner.hidden = true;
 
     if (cardCreatorSection) cardCreatorSection.hidden = false;
 
@@ -3559,15 +2706,6 @@ function getGridDataForPlayer(player) {
     };
 }
 
-function getMonsterGridData() {
-    return {
-        cells: currentEncounter?.grid || [],
-        size: currentEncounter?.size || 3,
-        marks: new Set(),
-        curses: new Set(currentEncounter?.curses || [])
-    };
-}
-
 function getOwnGridData() {
     return {
         cells: playerGridCells,
@@ -3679,6 +2817,11 @@ function commitCard(card) {
         selectedHealTargetID = currentPlayerID;
     }
 
+    // Monster cards start on a sensible Monster (monster.js).
+    if (mode === "monster" || mode === "monsterpick") {
+        prepareMonsterTarget(card);
+    }
+
     renderCombatCards();
     openPlayOverlay();
 }
@@ -3686,6 +2829,7 @@ function commitCard(card) {
 // Release the lock without an action having happened (errors, turn changes).
 function endPlay() {
     closePlayOverlay();
+    resetMonsterTargeting();
 
     playLocked = false;
 
@@ -4020,8 +3164,9 @@ function refreshPlayOverlay() {
 
     renderOverlayPicker(card, mode);
 
-    // Buff and Shield only pick a player: there is no grid to aim on.
-    const hasGrid = mode !== "buff" && mode !== "shield";
+    // Buff, Shield and the Monster-pick cards (Execute, Counter) only pick
+    // someone: there is no grid to aim on.
+    const hasGrid = mode !== "buff" && mode !== "shield" && mode !== "monsterpick";
     const stage = overlay.querySelector(".play-overlay-stage");
     stage.hidden = !hasGrid;
 
@@ -4066,8 +3211,12 @@ function renderOverlayPicker(card, mode) {
     const picker = playOverlay.querySelector(".play-overlay-picker");
 
     picker.replaceChildren();
-    picker.classList.toggle("is-buff", mode === "buff" || mode === "shield");
-    picker.hidden = !["heal", "buff", "shield"].includes(mode);
+    picker.classList.toggle(
+        "is-buff",
+        mode === "buff" || mode === "shield" || mode === "monsterpick"
+    );
+    picker.classList.toggle("is-monsters", mode === "monster" || mode === "monsterpick");
+    picker.hidden = !["heal", "buff", "shield", "monster", "monsterpick"].includes(mode);
 
     if (picker.hidden) return;
 

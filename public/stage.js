@@ -427,15 +427,18 @@
 
     /* ---------- Snapshots ---------- */
 
-    function snapshotMonster() {
-        const encounter = currentEncounter;
-        if (!encounter) return null;
+    // One Monster's grid as it is right now (each Monster has its own).
+    function snapshotMonster(monsterID) {
+        const monster = getMonsterByID(monsterID);
+        if (!monster) return null;
 
         return {
-            size: encounter.size,
-            cells: [...encounter.grid],
-            curses: new Set(encounter.curses || []),
-            name: encounter.name
+            id: monster.id,
+            species: monster.species,
+            size: monster.size,
+            cells: [...monster.grid],
+            curses: new Set(monster.curses || []),
+            name: monster.name
         };
     }
 
@@ -478,18 +481,20 @@
 
     // The server announces monster damage a moment BEFORE the card result
     // that caused it. Hold it here until that result arrives.
+    // Keyed by source AND Monster: a Blast can hit two Monsters at once.
     const pendingMonsterDamage = {};
 
-    function takePending(source) {
-        const pending = pendingMonsterDamage[source] || null;
-        delete pendingMonsterDamage[source];
+    function takePending(source, monsterID) {
+        const key = `${source}:${monsterID}`;
+        const pending = pendingMonsterDamage[key] || null;
+        delete pendingMonsterDamage[key];
         return pending;
     }
 
     socket.on("monster-damage-fx", data => {
         if (!data || !Array.isArray(data.steps) || data.steps.length === 0) return;
 
-        const snapshot = snapshotMonster();
+        const snapshot = snapshotMonster(data.monsterID);
         if (!snapshot) return;
 
         const pending = { snapshot, steps: data.steps, source: data.source };
@@ -504,7 +509,7 @@
             return;
         }
 
-        pendingMonsterDamage[data.source] = pending;
+        pendingMonsterDamage[`${data.source}:${data.monsterID}`] = pending;
     });
 
     /*
@@ -746,6 +751,9 @@
             lines.push(`${plural(result.armorDestroyed, "Armor cell")} destroyed`);
         }
 
+        // Blast can hit two Monsters; the card names them.
+        if (result.monsterName) lines.unshift(`Hits ${result.monsterName}`);
+
         const segments = [{
             type: "card",
             cardType,
@@ -753,50 +761,58 @@
             lines
         }];
 
-        let base = null;
+        const targets = result.monsterIDs || [result.monsterID];
 
-        const main = takePending(mainSource);
+        targets.forEach(monsterID => {
+            // Each Monster's own animation follows from its own grid.
+            let base = null;
 
-        if (main) {
-            // Armor the Thief pierced cracks apart (Penetrate).
-            main.pierced = result.piercedArmor || 0;
+            const detail = (result.targets || []).find(item => item.monsterID === monsterID);
+            const main = takePending(mainSource, monsterID);
 
-            const part = monsterDamageSegments(main, base);
-            segments.push(...part);
-            base = finalGridState(part) || base;
-        }
+            if (main) {
+                // Armor the Thief pierced cracks apart (Penetrate).
+                main.pierced = result.piercedArmor || 0;
 
-        const penetrate = takePending("penetrate");
+                const part = monsterDamageSegments(main, base);
+                segments.push(...part);
+                base = finalGridState(part) || base;
+            }
 
-        if (penetrate) {
-            segments.push({
-                type: "card",
-                cardType: "penetrate",
-                kicker: "PENETRATE",
-                title: "Armor Cleared",
-                lines: [`${plural(result.connectedArmor || 1, "connected Armor cell")} removed`]
-            });
+            const penetrate = takePending("penetrate", monsterID);
 
-            const part = monsterDamageSegments(penetrate, base);
-            segments.push(...part);
-            base = finalGridState(part) || base;
-        }
+            if (penetrate) {
+                segments.push({
+                    type: "card",
+                    cardType: "penetrate",
+                    kicker: "PENETRATE",
+                    title: "Armor Cleared",
+                    lines: [`${plural(result.connectedArmor || 1, "connected Armor cell")} removed`]
+                });
 
-        const status = takePending("status");
+                const part = monsterDamageSegments(penetrate, base);
+                segments.push(...part);
+                base = finalGridState(part) || base;
+            }
 
-        if (status) {
-            segments.push({
-                type: "card",
-                cardType: "status",
-                kicker: "STATUS CHARGE",
-                title: "Status",
-                lines: [`${result.statusDamage} extra damage`]
-            });
+            const status = takePending("status", monsterID);
 
-            const part = monsterDamageSegments(status, base);
-            segments.push(...part);
-            base = finalGridState(part) || base;
-        }
+            if (status) {
+                segments.push({
+                    type: "card",
+                    cardType: "status",
+                    kicker: "STATUS CHARGE",
+                    title: "Status",
+                    lines: [`${result.statusDamage} extra damage`]
+                });
+
+                const part = monsterDamageSegments(status, base);
+                segments.push(...part);
+                base = finalGridState(part) || base;
+            }
+
+            void detail;
+        });
 
         const heal = lifestealSegment(result.playerID, result.healPositions || []);
 
@@ -817,7 +833,7 @@
     });
 
     socket.on("player-spellvamp-resolved", result => {
-        const pending = takePending("spellvamp");
+        const pending = takePending("spellvamp", result.monsterID);
 
         const segments = [{
             type: "card",
@@ -846,7 +862,7 @@
     });
 
     socket.on("player-execute-resolved", result => {
-        const pending = takePending("execute");
+        const pending = takePending("execute", result.monsterID);
 
         const segments = [{
             type: "card",
@@ -864,7 +880,7 @@
     });
 
     socket.on("player-curse-resolved", result => {
-        const snapshot = snapshotMonster();
+        const snapshot = snapshotMonster(result.monsterID);
 
         const segments = [{
             type: "card",
@@ -1032,17 +1048,20 @@
 
     // A marked cell got hit: the Retaliate strikes back. Players only.
     socket.on("retaliate-triggered", result => {
-        const pending = takePending("retaliate");
+        const pending = takePending("retaliate", result.monsterID);
 
         const segments = [{
             type: "card",
             cardType: "retaliate",
             kicker: "RETALIATE",
             title: "Strikes Back!",
-            lines: [
-                `${plural(result.triggered, "strike")}`,
-                `${result.damage} damage`
-            ]
+            lines: result.converted
+                ? [`${result.monsterName}'s Adaptive Armor`, "turned it into healing"]
+                : [
+                    `Hits ${result.monsterName}`,
+                    `${plural(result.triggered, "strike")}`,
+                    `${result.damage} damage`
+                ]
         }];
 
         if (pending) segments.push(...monsterDamageSegments(pending));
@@ -1151,16 +1170,23 @@
     // The monster hits a player.
     socket.on("monster-attack-resolved", result => {
         const target = snapshotPlayer(result.playerID);
-        const monster = currentEncounter?.name || "Monster";
+        const monster = result.monsterName || "Monster";
 
+        const lines = [`Hits ${result.username}`];
+
+        if ((result.rageExtraPositions || []).length > 0) {
+            lines.push(`Raging Demon: +${result.rageExtraPositions.length} damage`);
+        }
+
+        // The Species portrait: spirit.png, devil.png or scale.png.
         const segments = [{
             type: "card",
             cardType: "monster",
             kicker: "MONSTER ATTACK",
-            art: "monster",
+            art: result.species,
             color: MONSTER_COLOR,
             title: monster,
-            lines: [`Hits ${result.username}`]
+            lines
         }];
 
         if (target) {
@@ -1186,6 +1212,8 @@
                 });
             });
 
+            // Raging Demon's extra damage already shows in the lists above.
+
             segments.push({
                 type: "grid",
                 label: `${target.name.toUpperCase()} · HEART GRID`,
@@ -1198,6 +1226,111 @@
 
         enqueue({
             actor: monster.toUpperCase(),
+            segments
+        });
+    });
+
+
+    /*
+        What a Monster does with its other dice: Heal, Armor, Undying, Debuff,
+        Counter, Taunt and Raging Demon. A card with its Species portrait, and
+        for Heal / Armor / Undying the grid that changed.
+    */
+    socket.on("monster-action-resolved", result => {
+        const KICKERS = {
+            heal: "MONSTER HEAL",
+            armor: "MONSTER ARMOR",
+            undying: "UNDYING",
+            debuff: "ENERGY DRAIN",
+            counter: "COUNTER",
+            taunt: "TAUNT",
+            "raging-demon": "RAGING DEMON"
+        };
+
+        const lines = {
+            heal: () => [
+                `${result.healedPositions.length} restored`,
+                `${result.overhealedPositions.length} Overheal`
+            ],
+            armor: () => [`${plural(result.positions.length, "cell")} armored`],
+            undying: () => [`${plural(result.cells.length, "cell")} Undying`],
+            debuff: () => [`${result.username} loses ${result.amount} Energy`],
+            counter: () => [`${result.username}: ${plural(result.turns, "turn")}`],
+            taunt: () => [`Aim ${result.taunt} cards at ${result.monsterName}`],
+            "raging-demon": () => [`${plural(result.rage, "turn")} of rage`]
+        };
+
+        const build = lines[result.kind];
+
+        if (!build) return;
+
+        const segments = [{
+            type: "card",
+            cardType: "monster",
+            kicker: KICKERS[result.kind],
+            art: result.species,
+            color: MONSTER_COLOR,
+            title: result.monsterName,
+            lines: build()
+        }];
+
+        // The grids that changed (each Monster has its own).
+        const changes = new Map();
+
+        const note = (monsterID, index, after, look) => {
+            if (!changes.has(monsterID)) changes.set(monsterID, []);
+            changes.get(monsterID).push({ index, after, look });
+        };
+
+        if (result.kind === "heal") {
+            result.healedPositions.forEach(index => note(result.targetMonsterID, index, "hp", "hp"));
+            result.overhealedPositions.forEach(index => note(result.targetMonsterID, index, "overheal", "overheal"));
+        } else if (result.kind === "armor") {
+            result.positions.forEach(index => {
+                const before = getMonsterByID(result.targetMonsterID)?.grid[index];
+                const after = before === "overheal" ? "armor-overheal"
+                    : before === "undying" ? "armor-undying" : "armor";
+
+                note(result.targetMonsterID, index, after, after);
+            });
+        } else if (result.kind === "undying") {
+            result.cells.forEach(cell => {
+                const before = getMonsterByID(cell.monsterID)?.grid[cell.index];
+                const after = before === "armor" ? "armor-undying" : "undying";
+
+                note(cell.monsterID, cell.index, after, after);
+            });
+        }
+
+        changes.forEach((list, monsterID) => {
+            const snapshot = snapshotMonster(monsterID);
+
+            if (!snapshot) return;
+
+            const cells = [...snapshot.cells];
+
+            list.forEach(change => {
+                cells[change.index] = change.after;
+            });
+
+            segments.push({
+                type: "grid",
+                label: `${monsterLabelOf(snapshot)} · MONSTER GRID`,
+                size: snapshot.size,
+                before: copyState(snapshot),
+                after: copyState({ cells, curses: snapshot.curses }),
+                fx: list.map(change => ({
+                    index: change.index,
+                    kind: "popin",
+                    look: change.look,
+                    delay: 0,
+                    duration: FX_POPIN_MS
+                }))
+            });
+        });
+
+        enqueue({
+            actor: result.monsterName.toUpperCase(),
             segments
         });
     });

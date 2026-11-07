@@ -22,7 +22,10 @@
     registerCardEvents(socket), which script.js calls once the socket exists.
 
     HOW A CARD IS AIMED  (def.mode)
-        monster   aim its 3x3 pattern on the monster's grid
+        monster   pick a Monster (the overlay lists them), then aim its 3x3
+                  pattern on that Monster's grid. def.multi = 2 lets Blast
+                  aim at two different Monsters.
+        monsterpick  pick a Monster, nothing to aim (Execute, Counter)
         self      aim its pattern on your own grid
         heal      pick a player, then aim its pattern on their grid
         buff      pick a teammate (no grid)
@@ -32,10 +35,10 @@
 
 const RAGE_ENERGY_PER_POSITION = 2;
 
-// Hex takes this much off Attack / Blast (never below the minimum).
-const HEX_DISCOUNT = 1;
+// Hex takes this much off Attack / Blast / Spellvamp / Curse (never below the minimum).
+const HEX_DISCOUNT = 2;
 const HEX_MIN_COST = 0.5;
-const HEX_AFFECTED_CARDS = ["attack", "blast"];
+const HEX_AFFECTED_CARDS = ["attack", "blast", "spellvamp", "curse"];
 
 // Destroying an Armor cell with a direct attack costs the attacker this much.
 const ARMOR_ENERGY_PENALTY = 0.5;
@@ -58,7 +61,9 @@ function plural(count, word) {
 
 // What the monster-damage part of an Attack / Blast result says.
 function describeGridDamage(result) {
-    const parts = [`${result.damage ?? 0} monster HP removed`];
+    const parts = [
+        `${result.damage ?? 0} HP removed from ${result.monsterName || "the monster"}`
+    ];
 
     if (result.overhealDamage > 0) {
         parts.push(`${result.overhealDamage} Overheal stripped`);
@@ -313,28 +318,31 @@ const CARD_DEFS = {
         pattern: false,
         min: 2,
         max: 6,
-        cost: n => n * 1.5,
-        mode: "none",
+        cost: n => n,
+        mode: "monsterpick",
         event: "player-counter",
         resolvedEvent: "player-counter-resolved",
 
         description:
-            "Gain one Counter Turn per position. After the monster completes an attack, you interrupt the turn " +
-            "order and get an extra Attack turn. No Energy regeneration during that extra turn. Costs exactly " +
-            "1.5 Energy per position. Requires 2-6 positions. No pattern needed.",
+            "Pick ONE Monster (its Taunt is ignored). Gain one Counter Turn per position: after THAT Monster " +
+            "finishes its turn you interrupt the turn order and get an extra Attack turn, and that attack can " +
+            "only hit the Monster you countered. No Energy regeneration during that extra turn. Costs exactly " +
+            "1 Energy per position. Requires 2-6 positions. No pattern needed.",
         summary: (n, cost) =>
             `Assigned: ${n} positions. Grants ${n} Counter Turns and costs ${cost} Energy.`,
         effect: (n, cost) => `${n} Counter Turns · costs ${cost}`,
         play: card =>
-            `Gain ${card.targetCount} Counter Turn${card.targetCount === 1 ? "" : "s"}. After the monster finishes ` +
-            "an attack, you get an extra Attack turn for each one (no Energy regeneration on those turns). No grid needed.",
+            `Choose one Monster. Gain ${card.targetCount} Counter Turn${card.targetCount === 1 ? "" : "s"}: after that ` +
+            "Monster finishes its turn, you get an extra Attack turn for each one, aimed only at it (no Energy " +
+            "regeneration on those turns). Ignores Taunt.",
+        aim: () => "Choose the one Monster to Counter. Its Taunt is ignored.",
 
         messages: r => ({
-            own: `Counter activated. ${r.counterTurns} Counter Turn(s) ready. ` +
-                "After the monster attacks, you can make an additional Attack.",
-            other: `${r.username} gained ${r.added} Counter Turn(s). ${r.counterTurns} now ready.`,
-            host: `${r.username} readied ${r.added} Counter Turn(s) (${r.counterTurns} total). ` +
-                "They get a bonus turn after the monster's turn."
+            own: `Counter activated on ${r.monsterName}. ${r.counterTurns} Counter Turn(s) ready. ` +
+                `After ${r.monsterName}'s turn, you can make an additional Attack against it.`,
+            other: `${r.username} gained ${r.added} Counter Turn(s) against ${r.monsterName}. ${r.counterTurns} now ready.`,
+            host: `${r.username} readied ${r.added} Counter Turn(s) against ${r.monsterName} (${r.counterTurns} total). ` +
+                "They get a bonus turn after its turn."
         })
     },
 
@@ -346,7 +354,7 @@ const CARD_DEFS = {
         min: 2,
         max: 6,
         cost: n => n * 1.5,
-        mode: "none",
+        mode: "monsterpick",
         event: "player-execute",
         resolvedEvent: "player-execute-resolved",
 
@@ -360,13 +368,20 @@ const CARD_DEFS = {
             `Eliminate up to ${card.targetCount} random healthy monster positions. You don't aim it, and it ` +
             "ignores Armor and Overheal.",
 
-        hasTarget: () => (currentEncounter?.grid || []).includes("hp"),
+        hasTarget: card =>
+            getSelectableMonsters(card).some(monster => monster.grid.includes("hp")),
 
-        messages: r => ({
-            own: `You used ${r.cardName}. ${r.damage} monster HP removed.`,
-            other: `${r.username} used ${r.cardName}. ${r.damage} monster HP removed.`,
-            host: `${r.username} used ${r.cardName}: ${r.damage} monster HP removed.`
-        })
+        messages: r => {
+            const text = r.adaptive
+                ? `${r.monsterName}'s Adaptive Armor turned it into healing!`
+                : `${r.damage} HP removed from ${r.monsterName}.`;
+
+            return {
+                own: `You used ${r.cardName}. ${text}`,
+                other: `${r.username} used ${r.cardName}. ${text}`,
+                host: `${r.username} used ${r.cardName}: ${text}`
+            };
+        }
     },
 
     /* ---------- Tank ---------- */
@@ -477,6 +492,7 @@ const CARD_DEFS = {
         max: 6,
         cost: n => n * 1.5,
         mode: "monster",
+        multi: 2,
         event: "player-blast",
         resolvedEvent: "player-blast-resolved",
 
@@ -579,11 +595,17 @@ const CARD_DEFS = {
         invalidMessage:
             "There is nothing to curse there. Aim at healthy, uncursed positions.",
 
-        messages: r => ({
-            own: `You marked ${r.marked} monster cell(s) with Curse. Damaging them triggers chain explosions.`,
-            other: `${r.username} cursed ${r.marked} monster position(s).`,
-            host: `${r.username} cursed ${r.marked} monster position(s).`
-        })
+        messages: r => r.adaptive
+            ? {
+                own: `${r.monsterName}'s Adaptive Armor turned your Curse into healing!`,
+                other: `${r.username}'s Curse on ${r.monsterName} became healing.`,
+                host: `${r.username}'s Curse on ${r.monsterName} became healing.`
+            }
+            : {
+                own: `You marked ${r.marked} cell(s) of ${r.monsterName} with Curse. Damaging them triggers chain explosions.`,
+                other: `${r.username} cursed ${r.marked} position(s) of ${r.monsterName}.`,
+                host: `${r.username} cursed ${r.marked} position(s) of ${r.monsterName}.`
+            }
     },
 
     hex: {
@@ -599,20 +621,20 @@ const CARD_DEFS = {
         resolvedEvent: "player-hex-resolved",
 
         description:
-            "For a number of monster turns equal to this card's positions, EVERY player's Attack and Blast cards " +
-            "cost 1 less Energy (never below 0.5). Re-casting it doesn't stack, it only refreshes. Costs 1.5 Energy " +
+            "For a number of monster turns equal to this card's positions, EVERY player's Attack, Blast, Spellvamp and Curse cards " +
+            "cost 2 less Energy (never below 0.5). Re-casting it doesn't stack, it only refreshes. Costs 1.5 Energy " +
             "per position. Requires 2-6 positions. No pattern needed.",
         summary: (n, cost) =>
-            `Assigned: ${n} positions. Attack and Blast cost 1 less for ${n} monster turns. Costs ${cost} Energy.`,
+            `Assigned: ${n} positions. Attack, Blast, Spellvamp and Curse cost 2 less for ${n} monster turns. Costs ${cost} Energy.`,
         effect: (n, cost) => `Hex ${n} turns · costs ${cost}`,
         play: card =>
             `For ${card.targetCount} monster turns, every player's Attack and Blast cards cost 1 less Energy ` +
             "(never below 0.5). No grid needed.",
 
         messages: r => ({
-            own: `Hex cast! Attack and Blast cost 1 less for ${r.turns} monster turn(s).`,
-            other: `${r.username} cast Hex: Attack and Blast cost 1 less for ${r.turns} turn(s).`,
-            host: `${r.username} cast Hex: Attack and Blast cost 1 less for ${r.turns} turn(s).`
+            own: `Hex cast! Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} monster turn(s).`,
+            other: `${r.username} cast Hex: Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} turn(s).`,
+            host: `${r.username} cast Hex: Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} turn(s).`
         })
     },
 
@@ -653,7 +675,7 @@ const CARD_DEFS = {
         pattern: false,
         min: 2,
         max: 6,
-        cost: n => n * 1.5,
+        cost: n => n,
         mode: "none",
         event: "player-lifesteal",
         resolvedEvent: "player-lifesteal-resolved",
@@ -661,7 +683,7 @@ const CARD_DEFS = {
         description:
             "Gain one Lifesteal Charge per position. Every successful hit of your Attack spends one to heal one " +
             "of your empty cells (never Overheal). Armor doesn't trigger it unless Penetrate pierces it. " +
-            "Costs 1.5 Energy per position. Requires 2-6 positions. No pattern needed.",
+            "Costs 1 Energy per position. Requires 2-6 positions. No pattern needed.",
         summary: (n, cost) =>
             `Assigned: ${n} positions. Gives ${n} Lifesteal Charges and costs ${cost} Energy.`,
         effect: (n, cost) => `${n} Lifesteal Charges · costs ${cost}`,
@@ -860,7 +882,11 @@ function hasPlayableTarget(card) {
 
     switch (def.mode) {
         case "monster":
-            return hasValidPlacement(card, "monster", getMonsterGridData());
+            return getSelectableMonsters(card).some(monster =>
+                hasValidPlacement(card, "monster", getMonsterGridData(monster))
+            );
+        case "monsterpick":
+            return getSelectableMonsters(card).length > 0;
         case "self":
             return hasValidPlacement(card, "self", getOwnGridData());
         default:
@@ -905,13 +931,18 @@ function confirmCardPlacement(anchor) {
 
     if (!def || (def.mode !== "monster" && def.mode !== "self")) return;
 
-    const data = def.mode === "monster" ? getMonsterGridData() : getOwnGridData();
+    // Aiming at a Monster (one, or two for Blast) is handled in monster.js.
+    if (def.mode === "monster") {
+        confirmMonsterPlacement(card, def, anchor);
+        return;
+    }
+
+    const data = getOwnGridData();
     const positions = getCardTargetPositions(card, anchor, data.size);
 
     if (!positions) {
-        combatCardMessage.textContent = def.mode === "monster"
-            ? "Invalid placement. The pattern must fit inside the monster grid."
-            : "Invalid placement. The pattern must fit inside your grid.";
+        combatCardMessage.textContent =
+            "Invalid placement. The pattern must fit inside your grid.";
 
         return;
     }
@@ -1000,6 +1031,12 @@ function confirmCardPlayerPick(player) {
     (createPlayerChip and the overlay live in script.js.)
 */
 function renderCardPicker(picker, card, mode) {
+    // Which Monster (monster.js).
+    if (mode === "monster" || mode === "monsterpick") {
+        renderMonsterPicker(picker, card, mode);
+        return;
+    }
+
     if (mode === "heal") {
         roomPlayers
             .filter(player => !isDeadPlayer(player))
@@ -1107,8 +1144,11 @@ function registerCardEvents(socket) {
     socket.on("retaliate-triggered", result => {
         if (currentRole === "player") {
             combatCardMessage.textContent =
-                `${result.username}'s Retaliate triggered ${result.triggered} time(s), ` +
-                `dealing ${result.damage} monster damage.`;
+                result.converted
+                    ? `${result.username}'s Retaliate triggered, but ${result.monsterName}'s ` +
+                        "Adaptive Armor turned it into healing."
+                    : `${result.username}'s Retaliate triggered ${result.triggered} time(s), ` +
+                        `dealing ${result.damage} damage to ${result.monsterName}.`;
         }
 
         renderCombatMonsterGrid();
@@ -1140,7 +1180,7 @@ function registerCardEvents(socket) {
     });
 
     socket.on("hex-expired", () => {
-        const text = "Hex has worn off. Attack and Blast cost full Energy again.";
+        const text = "Hex has worn off. Attack, Blast, Spellvamp and Curse cost full Energy again.";
 
         if (currentRole === "player") {
             combatCardMessage.textContent = text;

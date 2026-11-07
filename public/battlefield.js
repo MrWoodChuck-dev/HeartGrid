@@ -3,7 +3,8 @@
 ===================================== */
 
 /*
-    The Combat tab's scene. The Monster stands on the left (monster.png); the
+    The Combat tab's scene. Up to three Monsters stand on the left, each with
+    its own Species portrait (spirit.png, devil.png, scale.png); the
     party stands on the right, drawn from public/assets/<class>.png, in this
     formation (the Monster is on the left, so "front" is the left):
 
@@ -13,7 +14,7 @@
     Nothing is shown on the portraits except the player's name underneath.
     Hover one (tap on touch screens, focus with the keyboard) for details:
 
-        Monster  ->  its grid, and its current effects
+        Monster  ->  its grid, its Species passive and its current effects
         Player   ->  Energy on top, their Heart Grid in the center, their
                      cards at the bottom
 
@@ -46,8 +47,7 @@
     popover.hidden = true;
     document.body.appendChild(popover);
 
-    let monsterNameEl = null;
-    let monsterToken = null;
+    const monsterEntries = new Map();   // monster id -> { slot, token, name, badges }
 
     const slots = new Map();        // class name -> { slot, token, name, playerID }
 
@@ -82,45 +82,92 @@
 
     /* ---------- Portraits ---------- */
 
-    function ensureMonster() {
-        if (monsterToken) return;
+    function createMonsterEntry(monster) {
+        const slot = el("div", "bf-monster-slot");
+        slot.dataset.species = monster.species;
 
-        monsterToken = el("button", "bf-token");
-        monsterToken.type = "button";
+        const token = el("button", "bf-token");
+        token.type = "button";
 
         const image = document.createElement("img");
-        image.src = "/assets/monster.png";
+        image.src = monsterIconURL(monster.species);
         image.alt = "";
         image.draggable = false;
-        monsterToken.appendChild(image);
+        token.appendChild(image);
 
-        monsterNameEl = el("span", "bf-name");
+        const name = el("span", "bf-name");
+        const badges = el("span", "bf-badges");
 
-        monsterSide.append(monsterToken, monsterNameEl);
+        slot.append(token, name, badges);
+        monsterSide.appendChild(slot);
 
-        attachHover(monsterSide, monsterToken, () => ({
+        attachHover(slot, token, () => ({
             kind: "monster",
-            id: "monster",
-            anchor: monsterToken
+            id: monster.id,
+            anchor: token
         }));
+
+        return { slot, token, name, badges };
     }
 
-    function renderMonster() {
-        ensureMonster();
-
+    function renderMonsters() {
         const encounter = currentEncounter;
+        const list = encounter?.monsters || [];
+        const present = new Set();
 
-        monsterNameEl.textContent = encounter ? encounter.name : "No monster";
-        monsterToken.setAttribute(
-            "aria-label",
-            encounter ? `${encounter.name}, the monster` : "No monster yet"
-        );
+        list.forEach(monster => {
+            present.add(monster.id);
 
-        monsterSide.classList.toggle("is-empty", !encounter);
-        monsterSide.classList.toggle(
-            "is-active-turn",
-            Boolean(encounter?.active && encounter.currentTurn?.type === "monster")
-        );
+            let entry = monsterEntries.get(monster.id);
+
+            if (!entry) {
+                entry = createMonsterEntry(monster);
+                monsterEntries.set(monster.id, entry);
+            }
+
+            entry.name.textContent = monster.name;
+            entry.token.setAttribute(
+                "aria-label",
+                `${monster.name}, a ${MonsterData.SPECIES[monster.species].name}` +
+                    (monster.dead ? ", defeated" : "")
+            );
+
+            entry.slot.classList.toggle("is-dead", Boolean(monster.dead));
+            entry.slot.classList.toggle(
+                "is-active-turn",
+                Boolean(
+                    encounter?.active &&
+                    encounter.currentTurn?.type === "monster" &&
+                    encounter.currentTurn.id === monster.id
+                )
+            );
+
+            const parts = [];
+
+            if (monster.taunt > 0) parts.push(`TAUNT ${monster.taunt}`);
+            if (monster.advantage > 0) parts.push(`ADV +${monster.advantage}`);
+            if (monster.rage > 0) parts.push(`RAGE ${monster.rage}`);
+
+            entry.badges.replaceChildren(
+                ...parts.map(text => el("span", "bf-badge", text))
+            );
+        });
+
+        monsterEntries.forEach((entry, id) => {
+            if (present.has(id)) return;
+
+            if (open?.kind === "monster" && open.id === id) closePopover();
+
+            entry.slot.remove();
+            monsterEntries.delete(id);
+        });
+
+        list.forEach(monster => {
+            const entry = monsterEntries.get(monster.id);
+            if (entry) monsterSide.appendChild(entry.slot);
+        });
+
+        monsterSide.classList.toggle("is-empty", list.length === 0);
     }
 
     function createSlot(className) {
@@ -210,7 +257,7 @@
     }
 
     function renderBattlefield() {
-        renderMonster();
+        renderMonsters();
         renderParty();
 
         if (open) refreshPopover();
@@ -333,7 +380,8 @@
         let content = null;
 
         if (open.kind === "monster") {
-            content = buildMonsterPanel();
+            const monster = getMonsterByID(open.id);
+            content = monster ? buildMonsterPanel(monster) : null;
         } else {
             const player = getPlayerByID(open.id);
             content = player ? buildPlayerPanel(player) : null;
@@ -353,24 +401,41 @@
         positionPopover();
     }
 
-    function buildMonsterPanel() {
+    function buildMonsterPanel(monster) {
         const encounter = currentEncounter;
+        const species = MonsterData.SPECIES[monster.species];
 
-        if (!encounter) return null;
+        const title = el(
+            "h3",
+            "bf-popover-title",
+            `${monster.name}${monster.dead ? " · DEFEATED" : ""}`
+        );
 
-        const title = el("h3", "bf-popover-title", encounter.name);
+        const passive = el("p", "bf-popover-label", `${species.name.toUpperCase()} · ${species.passive.name.toUpperCase()}`);
 
         const grid = el("div", "heart-grid");
-        renderGrid(grid, encounter.grid, encounter.size, {
-            curses: new Set(encounter.curses || [])
+        renderGrid(grid, monster.grid, monster.size, {
+            curses: new Set(monster.curses || [])
         });
 
         const effects = el("div");
         effects.appendChild(el("p", "bf-popover-label", "CURRENT EFFECTS"));
 
         const list = el("div", "bf-effects");
-        const active = encounter.active ? encounter.effects || {} : {};
+        const active = encounter?.active ? encounter.effects || {} : {};
         let shown = 0;
+
+        // Taunt, Advantage and Raging Demon belong to this Monster alone.
+        const own = [];
+
+        if (monster.taunt > 0) own.push(`Taunt: aim ${monster.taunt} more card(s) at it`);
+        if (monster.advantage > 0) own.push(`Advantage +${monster.advantage} on its next roll`);
+        if (monster.rage > 0) own.push(`Raging Demon: ${monster.rage} turn(s) left`);
+
+        own.forEach(text => {
+            shown++;
+            list.appendChild(el("p", "bf-own-effect", text));
+        });
 
         MONSTER_EFFECT_TYPES.forEach(type => {
             const amount = active[type.key] || 0;
@@ -400,7 +465,7 @@
 
         effects.appendChild(list);
 
-        return [title, grid, effects];
+        return [title, passive, grid, effects];
     }
 
     function buildPlayerPanel(player) {
@@ -493,7 +558,7 @@
             left = (window.innerWidth - width) / 2;
             top = (window.innerHeight - height) / 2;
         } else if (open.kind === "monster") {
-            // The Monster is on the left: open toward the middle of the scene.
+            // The Monsters are on the left: open toward the middle of the scene.
             left = rect.right + POPOVER_GAP;
         } else {
             left = rect.left - width - POPOVER_GAP;

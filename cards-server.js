@@ -33,10 +33,10 @@ const RAGE_ENERGY_PER_POSITION = 2;
 // Armor: every Armor cell destroyed by a direct attack costs the attacker this much.
 const ARMOR_ENERGY_PENALTY = 0.5;
 
-// Hex: flat discount on Attack / Blast, which can never push a card below this.
-const HEX_DISCOUNT = 1;
+// Hex: flat discount on Attack / Blast / Spellvamp / Curse, which can never push a card below this.
+const HEX_DISCOUNT = 2;
 const HEX_MIN_COST = 0.5;
-const HEX_AFFECTED_CARDS = ["attack", "blast"];
+const HEX_AFFECTED_CARDS = ["attack", "blast", "spellvamp", "curse"];
 
 // Rest: extra Energy per Rest turn (on top of the Tank's natural +1) and
 // how many cells it heals each Rest turn.
@@ -75,7 +75,7 @@ const CARD_DEFS = {
     taunt: { pattern: false, cost: n => n },
     retaliate: { pattern: true, cost: n => n },
 
-    counter: { pattern: false, min: 2, max: 6, cost: n => n * 1.5 },
+    counter: { pattern: false, min: 2, max: 6, cost: n => n },
     curse: { pattern: true, min: 2, max: 6, cost: n => n * 1.5 },
     weaken: { pattern: false, min: 2, max: 6, cost: n => n * 1.5 },
 
@@ -95,7 +95,7 @@ const CARD_DEFS = {
 
     // Thief
     status: { pattern: false, cost: n => n },
-    lifesteal: { pattern: false, min: 2, max: 6, cost: n => n * 1.5 },
+    lifesteal: { pattern: false, min: 2, max: 6, cost: n => n },
     penetrate: { pattern: false, min: 2, max: 6, cost: n => n }
 };
 
@@ -151,16 +151,19 @@ function getCardCost(card, room = null) {
 
         hp              healthy
         overheal        healthy + Overheal
+        undying         Spirit's third health layer (a hit leaves Overheal)
         armor           Armor over a normal HP cell
         armor-overheal  Armor over an Overheal cell
+        armor-undying   Armor over an Undying cell
         empty           no HP
 
     Breaking Armor leaves the cell below it: empty for plain Armor, and the
-    original Overheal for Armor-over-Overheal.
+    original Overheal / Undying for Armor over those.
 */
 const ARMOR_BREAKS_TO = {
     armor: "empty",
-    "armor-overheal": "overheal"
+    "armor-overheal": "overheal",
+    "armor-undying": "undying"
 };
 
 function isArmorCell(cell) {
@@ -333,15 +336,14 @@ function neighbours(index, size) {
            Lifesteal (this is "Lifesteal through Armor")
         2. Armor next to a cell that was hit (up, down, left, right): removed
 */
-function resolveGridAttack(room, player, positions, source) {
-    const encounter = room.encounter;
-    const size = encounter.size;
+function resolveGridAttack(room, monster, player, positions, source) {
+    const size = monster.size;
 
     const isThief = player.className === "Thief";
     const charges = player.charges;
 
     // --- The attack itself ---
-    const hit = ctx.damageMonsterCells(room, positions, source, {
+    const hit = ctx.damageMonsterCells(room, monster, positions, source, {
         gridBased: true
     });
 
@@ -386,7 +388,7 @@ function resolveGridAttack(room, player, positions, source) {
         hit.directHits.forEach(index => {
             neighbours(index, size).forEach(next => {
                 if (
-                    isArmorCell(encounter.grid[next]) &&
+                    isArmorCell(monster.grid[next]) &&
                     !candidates.includes(next)
                 ) {
                     candidates.push(next);
@@ -398,7 +400,7 @@ function resolveGridAttack(room, player, positions, source) {
 
         if (chosen.length > 0) {
             // Removing connected Armor deals no damage: the cell underneath stays.
-            connectedArmor = ctx.stripMonsterDefenses(room, chosen, "penetrate")
+            connectedArmor = ctx.stripMonsterDefenses(room, monster, chosen, "penetrate")
                 .map(change => change.index);
             charges.penetrate -= connectedArmor.length;
         }
@@ -406,12 +408,13 @@ function resolveGridAttack(room, player, positions, source) {
 
     // --- Status: every successful hit can fire one charge ---
     let statusCharges = 0;
-    let statusHit = { damage: 0, overhealDamage: 0, exploded: [] };
+    let adaptive = false;
+    let statusHit = { damage: 0, overhealDamage: 0, undyingDamage: 0, exploded: [] };
     let statusPositions = [];
 
     if (isThief && charges.status > 0 && hit.directHits.length > 0) {
         const eligible = new Set(
-            ctx.getStatusTargetPositions(encounter)
+            ctx.getStatusTargetPositions(monster)
         );
 
         for (let i = 0; i < hit.directHits.length; i++) {
@@ -430,8 +433,13 @@ function resolveGridAttack(room, player, positions, source) {
             });
         }
 
+        // Status is not a grid attack: Scale may turn it into healing.
         if (statusPositions.length > 0) {
-            statusHit = ctx.damageMonsterCells(room, statusPositions, "status");
+            if (ctx.monsters.adaptiveArmor(room, monster, "status")) {
+                adaptive = true;
+            } else {
+                statusHit = ctx.damageMonsterCells(room, monster, statusPositions, "status");
+            }
         }
     }
 
@@ -443,22 +451,26 @@ function resolveGridAttack(room, player, positions, source) {
         connectedArmor,
         statusCharges,
         statusPositions,
-        statusHit
+        statusHit,
+        adaptive
     };
 }
 
 // The numbers every attack result carries to the clients.
-function describeAttackResult(room, player, card, cost, outcome) {
+function describeAttackResult(room, monster, player, card, cost, outcome) {
     const { hit } = outcome;
 
     return {
+        monsterID: monster.id,
+        monsterName: monster.name,
         playerID: player.id,
         username: player.username,
         cardName: card.name,
         cardType: card.type,
         positions: hit.directPositions,
         damage: hit.damage,
-        overhealDamage: hit.overhealDamage,
+        overhealDamage: hit.overhealDamage + (hit.undyingDamage || 0),
+        undyingDamage: hit.undyingDamage || 0,
         armorDestroyed: hit.armorBroken.length,
         exploded: hit.exploded.length,
 
@@ -469,7 +481,9 @@ function describeAttackResult(room, player, card, cost, outcome) {
         healed: outcome.healedPositions.length,
         statusCharges: outcome.statusCharges,
         statusDamage:
-            outcome.statusHit.damage + outcome.statusHit.overhealDamage,
+            outcome.statusHit.damage + outcome.statusHit.overhealDamage +
+            (outcome.statusHit.undyingDamage || 0),
+        adaptive: Boolean(outcome.adaptive),
 
         // Private: the Host's copy has these removed.
         energyPenalty: outcome.armorPenalty,
@@ -581,10 +595,15 @@ function registerSocketHandlers(socket) {
             return;
         }
 
-        const encounter = room.encounter;
         const card = findCard(socket, player, data?.cardID, "attack", "Attack");
 
         if (!card) return;
+
+        const targets = ctx.monsters.resolveTargets(socket, room, data);
+
+        if (!targets) return;
+
+        const monster = targets[0];
 
         const cost = getCardCost(card, room);
 
@@ -593,7 +612,7 @@ function registerSocketHandlers(socket) {
         const positions = ctx.calculateCardPositions(
             card,
             data?.anchor,
-            encounter.size
+            monster.size
         );
 
         if (!positions) {
@@ -601,11 +620,13 @@ function registerSocketHandlers(socket) {
             return;
         }
 
-        const outcome = resolveGridAttack(room, player, positions, "attack");
+        const outcome = resolveGridAttack(room, monster, player, positions, "attack");
 
         player.energy -= cost + outcome.armorPenalty;
 
-        const result = describeAttackResult(room, player, card, cost, outcome);
+        ctx.monsters.consumeTaunt(room, targets);
+
+        const result = describeAttackResult(room, monster, player, card, cost, outcome);
 
         ctx.emitToPlayersAndHost(room, "player-attack-resolved", result);
 
@@ -613,7 +634,7 @@ function registerSocketHandlers(socket) {
         ctx.emitTurnState(room.roomID);
 
         console.log(
-            `${player.username} attacked ${encounter.name} with ${card.name}. ` +
+            `${player.username} attacked ${monster.name} with ${card.name}. ` +
             `Damage: ${result.damage}, Armor broken: ${result.armorDestroyed}`
         );
     });
@@ -621,10 +642,10 @@ function registerSocketHandlers(socket) {
     /* ---------- Blast  (Mage) ---------- */
 
     /*
-        Blast is built to hit up to TWO different monsters at once. A fight
-        only has one monster at the moment, so it lands on that monster once
-        (it can never hit the same monster twice for double damage). When
-        multi-monster encounters arrive, this is the handler to extend.
+        Blast can hit up to TWO different Monsters at once. Each target gets
+        its own anchor (data.targets = [{ monsterID, anchor }, ...]) so the
+        pattern is aimed on each grid separately. The same Monster can never
+        be hit twice by one Blast. The card is paid for once.
     */
     socket.on("player-blast", data => {
         const room = rooms.get(socket.data.roomID);
@@ -638,40 +659,115 @@ function registerSocketHandlers(socket) {
 
         if (!player) return;
 
-        const encounter = room.encounter;
         const card = findCard(socket, player, data?.cardID, "blast", "Blast");
 
         if (!card) return;
+
+        // One entry per target; a single { monsterID, anchor } still works.
+        let aims = Array.isArray(data?.targets)
+            ? data.targets
+            : [{ monsterID: data?.monsterID, anchor: data?.anchor }];
+
+        aims = aims.filter(aim => aim && typeof aim === "object");
+
+        if (aims.length < 1 || aims.length > 2) {
+            socket.emit("combat-action-error", "Blast hits one or two Monsters.");
+            return;
+        }
+
+        const targets = ctx.monsters.resolveTargets(
+            socket,
+            room,
+            { monsterIDs: aims.map(aim => aim.monsterID) },
+            { max: 2 }
+        );
+
+        if (!targets) return;
 
         const cost = getCardCost(card, room);
 
         if (!canAfford(socket, player, cost, "Blast")) return;
 
-        const positions = ctx.calculateCardPositions(
-            card,
-            data?.anchor,
-            encounter.size
-        );
+        const placements = [];
 
-        if (!positions) {
-            socket.emit("combat-action-error", "That pattern does not fit there.");
-            return;
+        for (let i = 0; i < targets.length; i++) {
+            const positions = ctx.calculateCardPositions(
+                card,
+                aims[i].anchor,
+                targets[i].size
+            );
+
+            if (!positions) {
+                socket.emit(
+                    "combat-action-error",
+                    `That pattern does not fit on ${targets[i].name}'s grid there.`
+                );
+
+                return;
+            }
+
+            placements.push({ monster: targets[i], positions });
         }
 
-        const outcome = resolveGridAttack(room, player, positions, "blast");
+        const hits = placements.map(({ monster, positions }) => {
+            const outcome = resolveGridAttack(room, monster, player, positions, "blast");
 
-        player.energy -= cost + outcome.armorPenalty;
+            return { monster, outcome };
+        });
 
-        const result = describeAttackResult(room, player, card, cost, outcome);
+        const armorPenalty = hits.reduce(
+            (total, hit) => total + hit.outcome.armorPenalty,
+            0
+        );
 
-        ctx.emitToPlayersAndHost(room, "player-blast-resolved", result);
+        player.energy -= cost + armorPenalty;
+
+        ctx.monsters.consumeTaunt(room, targets);
+
+        // One result per Monster hit; the first carries the card's cost.
+        const results = hits.map(({ monster, outcome }, index) => {
+            const result = describeAttackResult(room, monster, player, card, cost, outcome);
+
+            if (index > 0) {
+                result.energyPenalty = outcome.armorPenalty;
+                result.energySpent = outcome.armorPenalty;
+            } else {
+                result.energyPenalty = armorPenalty;
+                result.energySpent = cost + armorPenalty;
+            }
+
+            result.remainingEnergy = player.energy;
+
+            return result;
+        });
+
+        // The result the clients already understand (first Monster), plus all.
+        const combined = {
+            ...results[0],
+            targets: results.map(result => ({
+                monsterID: result.monsterID,
+                monsterName: result.monsterName,
+                damage: result.damage,
+                overhealDamage: result.overhealDamage,
+                armorDestroyed: result.armorDestroyed,
+                exploded: result.exploded
+            })),
+            damage: results.reduce((total, result) => total + result.damage, 0),
+            overhealDamage: results.reduce((total, result) => total + result.overhealDamage, 0),
+            armorDestroyed: results.reduce((total, result) => total + result.armorDestroyed, 0),
+            exploded: results.reduce((total, result) => total + result.exploded, 0),
+            monsterIDs: results.map(result => result.monsterID),
+            monsterName: results.map(result => result.monsterName).join(" & ")
+        };
+
+        ctx.emitToPlayersAndHost(room, "player-blast-resolved", combined);
 
         ctx.finishPlayerAction(room, player);
         ctx.emitTurnState(room.roomID);
 
         console.log(
-            `${player.username} blasted ${encounter.name} with ${card.name}. ` +
-            `Damage: ${result.damage}`
+            `${player.username} blasted ${combined.monsterName} with ${card.name}. ` +
+            `Damage: ${combined.damage}`
         );
     });
 
@@ -689,10 +785,15 @@ function registerSocketHandlers(socket) {
 
         if (!player) return;
 
-        const encounter = room.encounter;
         const card = findCard(socket, player, data?.cardID, "spellvamp", "Spellvamp");
 
         if (!card) return;
+
+        const monsterTargets = ctx.monsters.resolveTargets(socket, room, data);
+
+        if (!monsterTargets) return;
+
+        const monster = monsterTargets[0];
 
         const cost = getCardCost(card, room);
 
@@ -701,7 +802,7 @@ function registerSocketHandlers(socket) {
         const positions = ctx.calculateCardPositions(
             card,
             data?.anchor,
-            encounter.size
+            monster.size
         );
 
         if (!positions) {
@@ -709,9 +810,9 @@ function registerSocketHandlers(socket) {
             return;
         }
 
-        // Spellvamp only touches Armor and Overheal.
+        // Spellvamp only touches Armor and Overheal (never Undying itself).
         const targets = positions.filter(position => {
-            const cell = encounter.grid[position];
+            const cell = monster.grid[position];
 
             return isArmorCell(cell) || cell === "overheal";
         });
@@ -730,13 +831,13 @@ function registerSocketHandlers(socket) {
         let gained = 0;
 
         targets.forEach(position => {
-            gained += encounter.grid[position] === "armor-overheal" ? 2 : 1;
+            gained += monster.grid[position] === "armor-overheal" ? 2 : 1;
         });
 
         // Spellvamp deals NO damage. It only strips Armor and Overheal, and
         // whatever is under them stays: Armor + Overheal -> plain HP, Armor
         // alone -> the HP underneath, Overheal alone -> plain HP.
-        const stripped = ctx.stripMonsterDefenses(room, targets, "spellvamp", {
+        const stripped = ctx.stripMonsterDefenses(room, monster, targets, "spellvamp", {
             stripOverheal: true
         });
 
@@ -745,6 +846,8 @@ function registerSocketHandlers(socket) {
 
         player.energy -= cost + armorPenalty;
         player.charges.spellvamp += gained;
+
+        ctx.monsters.consumeTaunt(room, monsterTargets);
 
         // Every full set of charges becomes one heal.
         const healedPositions = [];
@@ -763,6 +866,8 @@ function registerSocketHandlers(socket) {
         }
 
         ctx.emitToPlayersAndHost(room, "player-spellvamp-resolved", {
+            monsterID: monster.id,
+            monsterName: monster.name,
             playerID: player.id,
             username: player.username,
             cardName: card.name,
@@ -801,22 +906,27 @@ function registerSocketHandlers(socket) {
 
         if (!player) return;
 
-        const encounter = room.encounter;
         const card = findCard(socket, player, data?.cardID, "execute", "Execute");
 
         if (!card) return;
+
+        const monsterTargets = ctx.monsters.resolveTargets(socket, room, data);
+
+        if (!monsterTargets) return;
+
+        const monster = monsterTargets[0];
 
         const cost = getCardCost(card, room);
 
         if (!canAfford(socket, player, cost, "Execute")) return;
 
-        // Healthy cells only. Armor and Overheal are never picked.
-        const healthy = ctx.getHealthyMonsterPositions(encounter);
+        // Healthy cells only. Armor, Overheal and Undying are never picked.
+        const healthy = ctx.getHealthyMonsterPositions(monster);
 
         if (healthy.length === 0) {
             socket.emit(
                 "combat-action-error",
-                "There are no healthy monster positions left to execute."
+                `There are no healthy positions left on ${monster.name} to execute.`
             );
 
             return;
@@ -824,15 +934,25 @@ function registerSocketHandlers(socket) {
 
         const targets = ctx.shuffle(healthy).slice(0, card.targetCount);
 
-        const hit = ctx.damageMonsterCells(room, targets, "execute");
+        // Execute is not a grid attack: Scale may turn it into healing.
+        const adaptive = Boolean(ctx.monsters.adaptiveArmor(room, monster, "execute"));
+
+        const hit = adaptive
+            ? { damage: 0, exploded: [] }
+            : ctx.damageMonsterCells(room, monster, targets, "execute");
 
         player.energy -= cost;
 
+        ctx.monsters.consumeTaunt(room, monsterTargets);
+
         ctx.emitToPlayersAndHost(room, "player-execute-resolved", {
+            monsterID: monster.id,
+            monsterName: monster.name,
+            adaptive,
             playerID: player.id,
             username: player.username,
             cardName: card.name,
-            positions: targets,
+            positions: adaptive ? [] : targets,
             damage: hit.damage,
             exploded: hit.exploded.length,
             energySpent: cost,
@@ -1090,10 +1210,15 @@ function registerSocketHandlers(socket) {
 
         if (!player) return;
 
-        const encounter = room.encounter;
         const card = findCard(socket, player, data?.cardID, "curse", "Curse");
 
         if (!card) return;
+
+        const monsterTargets = ctx.monsters.resolveTargets(socket, room, data);
+
+        if (!monsterTargets) return;
+
+        const monster = monsterTargets[0];
 
         const cost = getCardCost(card, room);
 
@@ -1102,7 +1227,7 @@ function registerSocketHandlers(socket) {
         const positions = ctx.calculateCardPositions(
             card,
             data?.anchor,
-            encounter.size
+            monster.size
         );
 
         if (!positions) {
@@ -1114,8 +1239,8 @@ function registerSocketHandlers(socket) {
         // Overheal are never "hp", so they can never be cursed.
         const markable = positions.filter(
             position =>
-                encounter.grid[position] === "hp" &&
-                !encounter.curses.has(position)
+                monster.grid[position] === "hp" &&
+                !monster.curses.has(position)
         );
 
         if (markable.length === 0) {
@@ -1127,16 +1252,24 @@ function registerSocketHandlers(socket) {
             return;
         }
 
-        markable.forEach(position => encounter.curses.add(position));
+        // A Marking card: Scale may turn it into healing instead.
+        const adaptive = Boolean(ctx.monsters.adaptiveArmor(room, monster, "curse"));
+
+        if (!adaptive) markable.forEach(position => monster.curses.add(position));
 
         player.energy -= cost;
 
+        ctx.monsters.consumeTaunt(room, monsterTargets);
+
         ctx.emitToPlayersAndHost(room, "player-curse-resolved", {
+            monsterID: monster.id,
+            monsterName: monster.name,
+            adaptive,
             playerID: player.id,
             username: player.username,
             cardName: card.name,
-            positions: markable,
-            marked: markable.length,
+            positions: adaptive ? [] : markable,
+            marked: adaptive ? 0 : markable.length,
             energySpent: cost,
             remainingEnergy: player.energy
         });
@@ -1483,16 +1616,30 @@ function registerSocketHandlers(socket) {
 
         if (!card) return;
 
+        // Counter picks ONE Monster. It ignores that Monster's Taunt.
+        const monsterTargets = ctx.monsters.resolveTargets(
+            socket,
+            room,
+            data,
+            { max: 1, ignoreTaunt: true }
+        );
+
+        if (!monsterTargets) return;
+
+        const monster = monsterTargets[0];
+
         const cost = getCardCost(card, room);
 
         if (!canAfford(socket, player, cost, "Counter")) return;
 
         player.energy -= cost;
 
-        // Each position is one Counter Turn. Counter stacks.
-        player.counterTurns = (player.counterTurns || 0) + card.targetCount;
+        // Each position is one Counter Turn after that Monster's turn. Counter stacks.
+        ctx.monsters.addWarriorCounter(player, monster, card.targetCount);
 
         ctx.emitToPlayersAndHost(room, "player-counter-resolved", {
+            monsterID: monster.id,
+            monsterName: monster.name,
             playerID: player.id,
             username: player.username,
             cardName: card.name,

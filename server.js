@@ -18,13 +18,21 @@ const STARTING_ENERGY = 5;
 // lives in cards-server.js. This file only keeps the core game.
 const cards = require("./cards-server");
 
+// Monsters (species, the bench, damage, the Host's monster turn) live in
+// monster-server.js.
+const monsters = require("./monster-server");
+
 const ENERGY_REGEN = {
     Tank: 1,
     Warrior: 2,
-    Support: 2,
-    Thief: 3,
+    Support: 3,
+    Thief: 4,
     Mage: 3
 };
+
+// Classes whose natural regeneration ignores the Energy cap (the display
+// still says 9, but they can keep climbing into Overheal-style overflow).
+const UNCAPPED_REGEN_CLASSES = ["Thief"];
 
 const CLASSES = ["Tank", "Warrior", "Mage", "Support", "Thief"];
 
@@ -35,9 +43,6 @@ const CLASS_GRID_SIZES = {
     Mage: 3,
     Thief: 3
 };
-
-// Monster cells the Host may paint before an encounter starts.
-const MONSTER_SETUP_STATES = ["hp", "overheal", "armor", "armor-overheal"];
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -70,6 +75,12 @@ function shuffle(array) {
 function regeneratePlayerEnergy(player) {
     const regen = ENERGY_REGEN[player.className] || 0;
 
+    // The Thief's regeneration bypasses the cap entirely.
+    if (UNCAPPED_REGEN_CLASSES.includes(player.className)) {
+        player.energy += regen;
+        return;
+    }
+
     // Players above the Energy cap keep their extra Energy.
     if (player.energy < MAX_ENERGY) {
         player.energy = Math.min(
@@ -92,6 +103,7 @@ function getPublicPlayer(player, includeMarks = false, room = null) {
         cardCount: player.cards.length,
         hasAssignment: Boolean(player.assignment),
         counterTurns: player.counterTurns ?? 0,
+        counters: { ...(player.counters || {}) },
 
         // Card effects are visible to everyone (Retaliate marks are the one secret).
         charges: { ...(player.charges || {}) },
@@ -148,16 +160,32 @@ function getRoomState(roomID) {
 ===================================== */
 
 function getCurrentTurn(room) {
-    // While a Counter turn is running it replaces the normal turn.
+    // While a bonus turn is running it replaces the normal turn.
     if (room.counterTurn) {
+        const bonus = room.counterTurn;
+
+        // Devil's Counter: the Monster itself gets a restricted bonus action.
+        if (bonus.kind === "devil") {
+            const monster = room.initiativeOrder?.find(
+                participant =>
+                    participant.type === "monster" &&
+                    participant.id === bonus.monsterID
+            );
+
+            return monster
+                ? { ...monster, bonus: true, restricted: true }
+                : null;
+        }
+
+        // The Warrior's Counter: a bonus Attack after a Monster's turn.
         const base = room.initiativeOrder?.find(
             participant =>
                 participant.type === "player" &&
-                participant.id === room.counterTurn.playerID
+                participant.id === bonus.playerID
         );
 
         return base
-            ? { ...base, counter: true }
+            ? { ...base, counter: true, counterMonsterID: bonus.monsterID }
             : null;
     }
 
@@ -173,7 +201,7 @@ function getMonsterEffects(room) {
         players.reduce(
             (total, player) => total + (player.counterTurns || 0),
             0
-        ) + (room.counterTurn ? 1 : 0);
+        ) + (room.counterTurn?.kind === "warrior" ? 1 : 0);
 
     // Status is a Charge card now: the total the Thief is holding.
     const status = players.reduce(
@@ -196,26 +224,41 @@ function getMonsterEffects(room) {
 function getEncounterState(room) {
     if (!room.encounter) return null;
 
+    const counterBonus = room.counterTurn;
+
     return {
-        name: room.encounter.name,
-        size: room.encounter.size,
-        grid: [...room.encounter.grid],
         active: room.encounter.active,
+
+        // Every Monster on the bench, each with its own grid and state.
+        monsters: monsters.getPublicMonsters(room),
+        maxMonsters: monsters.MAX_MONSTERS,
+
         initiativeOrder: room.initiativeOrder || [],
         currentTurn: getCurrentTurn(room),
+
+        // What the current Monster has rolled / spent this turn.
+        monsterTurn: monsters.getPublicMonsterTurn(room),
+
         // Keep bonus Counter turns visible to the Host as well as players.
         counterPlayers: Array.from(room.players.values())
-            .filter(player => (player.counterTurns || 0) > 0 || room.counterTurn?.playerID === player.id)
+            .filter(player =>
+                (player.counterTurns || 0) > 0 ||
+                (counterBonus?.kind === "warrior" && counterBonus.playerID === player.id)
+            )
             .map(player => ({
                 playerID: player.id,
                 username: player.username,
                 counterTurns: player.counterTurns || 0,
-                active: room.counterTurn?.playerID === player.id
+                counters: { ...(player.counters || {}) },
+                active:
+                    counterBonus?.kind === "warrior" &&
+                    counterBonus.playerID === player.id
             })),
-        monsterHasActed: room.monsterHasActed || false,
+
+        // Counters Devils have put on players.
+        devilCounters: monsters.getPublicDevilCounters(room),
 
         weaken: room.weaken || 0,
-        curses: [...(room.encounter.curses || [])],
 
         // Shown in the Monster's Effects panel (Host and players).
         // Taunt and Weaken are Charges; Counter and Status are Turns.
@@ -226,7 +269,7 @@ function getEncounterState(room) {
                 tankID: room.taunt.tankID,
                 tankUsername: room.taunt.tankUsername,
                 remainingDamage: room.taunt.remainingDamage,
-                // Resting or Shielded: the charges wait, the monster is free.
+                // Resting or Shielded: the charges wait, the monsters are free.
                 paused: cards.isTauntPaused(
                     room,
                     room.players.get(room.taunt.tankID)
@@ -239,7 +282,7 @@ function getEncounterState(room) {
             ? { remaining: room.hex.remaining }
             : null,
 
-        // The one player the monster can't target right now.
+        // The one player the monsters can't target right now.
         shield: room.shield
             ? {
                 targetID: room.shield.targetID,
@@ -341,213 +384,6 @@ function getHittablePositions(grid) {
     return grid
         .map((cell, index) => isHittable(cell) ? index : -1)
         .filter(index => index !== -1);
-}
-
-// Healthy monster cells: plain HP only (no Overheal, no Armor).
-function getHealthyMonsterPositions(encounter) {
-    return encounter.grid
-        .map((cell, index) => cell === "hp" ? index : -1)
-        .filter(index => index !== -1);
-}
-
-// What Status may pick: healthy and Overheal cells, never Armor.
-function getStatusTargetPositions(encounter) {
-    return encounter.grid
-        .map((cell, index) => isHittable(cell) ? index : -1)
-        .filter(index => index !== -1);
-}
-
-/* =====================================
-   MONSTER DAMAGE (ARMOR + CURSE CHAINS)
-===================================== */
-
-/*
-    Every source of damage to the monster goes through here:
-    attacks, Blast, Spellvamp, Execute, Status, Retaliate and Curse
-    explosions.
-
-    Hitting a cell:
-        hp        -> empty
-        overheal  -> hp      (the Overheal is used up)
-        armor     -> empty / overheal   (only if options.gridBased)
-
-    ARMOR is only ever touched by grid-based attacks (options.gridBased).
-    Execute, Status, Retaliate and Curse explosions skip it completely.
-
-    A cursed position that is damaged explodes: the positions up, down,
-    left and right of it are damaged too (Armor ignores explosions). Those
-    can be cursed as well, which makes a chain reaction. Each curse only
-    explodes once.
-
-    Returns:
-        damage          cells that lost HP (direct hits and explosions)
-        overhealDamage  cells that lost Overheal
-        exploded        curses that went off
-        armorBroken     Armor cells destroyed (positions)
-        directPositions every cell the attack itself changed (Armor included)
-        directHits      the same, without Armor: the "successful hits"
-*/
-function damageMonsterCells(room, positions, source = "attack", options = {}) {
-    const encounter = room.encounter;
-    const size = encounter.size;
-    const curses = encounter.curses;
-    const gridBased = Boolean(options.gridBased);
-
-    const exploded = [];
-
-    // Visual chain for the clients: step 0 is everything hit directly,
-    // step 1 is everything hurt by the explosions of step 0, and so on.
-    // Each cell carries its old and new state so the client can animate it.
-    const steps = [];
-
-    const result = {
-        damage: 0,
-        overhealDamage: 0,
-        exploded,
-        armorBroken: [],
-        directPositions: [],
-        directHits: []
-    };
-
-    // Changes one cell, or returns null when this hit does nothing to it.
-    function hitCell(index, canBreakArmor) {
-        const before = encounter.grid[index];
-
-        let after = null;
-
-        if (before === "hp") {
-            after = "empty";
-        } else if (before === "overheal") {
-            after = "hp";
-        } else if (canBreakArmor && cards.isArmorCell(before)) {
-            after = cards.ARMOR_BREAKS_TO[before];
-        }
-
-        if (after === null) return null;
-
-        encounter.grid[index] = after;
-
-        if (before === "overheal") {
-            result.overhealDamage++;
-        } else if (before === "hp") {
-            result.damage++;
-        }
-
-        return { index, before, after };
-    }
-
-    let current = [];
-    const seen = new Set();
-
-    positions.forEach(position => {
-        if (seen.has(position)) return;
-        seen.add(position);
-
-        const change = hitCell(position, gridBased);
-
-        if (!change) return;
-
-        current.push(change);
-        result.directPositions.push(position);
-
-        if (cards.isArmorCell(change.before)) {
-            result.armorBroken.push(position);
-        } else {
-            result.directHits.push(position);
-        }
-    });
-
-    while (current.length > 0) {
-        steps.push({
-            cells: current.map(change => ({
-                index: change.index,
-                cursed: curses.has(change.index),
-                before: change.before,
-                after: change.after
-            }))
-        });
-
-        const next = [];
-
-        current.forEach(change => {
-            if (!curses.has(change.index)) return;
-
-            curses.delete(change.index);
-            exploded.push(change.index);
-
-            const row = Math.floor(change.index / size);
-            const column = change.index % size;
-
-            [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dRow, dColumn]) => {
-                const r = row + dRow;
-                const c = column + dColumn;
-
-                if (r < 0 || r >= size || c < 0 || c >= size) return;
-
-                // Armor ignores Curse explosions.
-                const explosion = hitCell(r * size + c, false);
-
-                if (explosion) next.push(explosion);
-            });
-        });
-
-        current = next;
-    }
-
-    // Everyone (Host included) gets the same animation order.
-    if (steps.length > 0) {
-        io.to(room.roomID).emit("monster-damage-fx", {
-            source,
-            steps
-        });
-    }
-
-    return result;
-}
-
-/*
-    Takes defences off cells WITHOUT damaging them: no HP is ever lost.
-    Used by Penetrate (Armor next to a hit cell) and Spellvamp.
-
-        armor           -> hp        (the HP cell that was underneath)
-        armor-overheal  -> overheal  (or hp when options.stripOverheal)
-        overheal        -> hp        (only when options.stripOverheal)
-
-    Returns what changed: [{ index, before, after }].
-*/
-function stripMonsterDefenses(room, positions, source, options = {}) {
-    const encounter = room.encounter;
-    const changes = [];
-
-    positions.forEach(index => {
-        const before = encounter.grid[index];
-
-        let after = null;
-
-        if (before === "armor") {
-            after = "hp";
-        } else if (before === "armor-overheal") {
-            after = options.stripOverheal ? "hp" : "overheal";
-        } else if (before === "overheal" && options.stripOverheal) {
-            after = "hp";
-        }
-
-        if (after === null) return;
-
-        encounter.grid[index] = after;
-        changes.push({ index, before, after });
-    });
-
-    if (changes.length > 0) {
-        io.to(room.roomID).emit("monster-damage-fx", {
-            source,
-            steps: [{
-                cells: changes.map(change => ({ ...change, cursed: false }))
-            }]
-        });
-    }
-
-    return changes;
 }
 
 /* =====================================
@@ -658,19 +494,30 @@ function isDead(player) {
     return getHittablePositions(player.grid).length === 0;
 }
 
-// Dead players lose their turn. The monster is never skipped,
-// so this loop always ends.
+// Dead players lose their turn, and so do defeated Monsters. The loop is
+// bounded by the number of participants, so it always ends.
+function isParticipantOut(room, participant) {
+    if (participant?.type === "monster") {
+        const monster = monsters.getMonster(room, participant.id);
+
+        return !monster || monsters.isMonsterDead(monster);
+    }
+
+    const member = room.players.get(participant?.id);
+
+    return !member || isDead(member);
+}
+
 function skipDeadTurns(room) {
     const total = room.initiativeOrder?.length || 0;
 
     for (let i = 0; i < total; i++) {
         const turn = getCurrentTurn(room);
 
-        if (turn?.type !== "player") return;
+        // A bonus turn is only ever started for someone who can take it.
+        if (!turn || turn.bonus || turn.counter) return;
 
-        const member = room.players.get(turn.id);
-
-        if (member && !isDead(member)) return;
+        if (!isParticipantOut(room, turn)) return;
 
         room.turnIndex = (room.turnIndex + 1) % total;
     }
@@ -716,83 +563,147 @@ function canAffordAnAttack(player, room) {
     );
 }
 
-// The Warrior who gets to Counter after the monster's attack, if any.
-function findCounteringWarrior(room) {
-    // A stored Counter charge grants a bonus turn to a living Warrior.
-    // Do not require Energy or an Attack card here: the Warrior still gets
-    // the turn and may use an available legal action or simply end it.
-    return Array.from(room.players.values()).find(
-        player =>
-            player.className === "Warrior" &&
-            (player.counterTurns || 0) > 0 &&
-            !isDead(player)
-    ) || null;
-}
-
 /* =====================================
    TURN ADVANCEMENT
 ===================================== */
 
+// Forgets what the last turn did (the Monster's dice, leftover rolls).
+function resetTurnFlags(room) {
+    monsters.clearMonsterTurn(room);
+}
+
+// Starts a bonus turn: a Warrior's Counter or a Devil's Counter.
+function startBonusTurn(room, bonus) {
+    room.counterTurn = bonus;
+
+    resetTurnFlags(room);
+
+    if (bonus.kind === "warrior") {
+        const warrior = room.players.get(bonus.playerID);
+
+        io.to(room.roomID).emit("counter-turn-started", {
+            playerID: warrior.id,
+            username: warrior.username,
+            monsterID: bonus.monsterID,
+            monsterName: monsters.getMonster(room, bonus.monsterID)?.name || "",
+            counterTurnsLeft: warrior.counterTurns
+        });
+    } else {
+        const monster = monsters.getMonster(room, bonus.monsterID);
+        const target = room.players.get(bonus.playerID);
+
+        io.to(room.roomID).emit("monster-bonus-started", {
+            monsterID: bonus.monsterID,
+            monsterName: monster?.name || "",
+            playerID: bonus.playerID,
+            username: target?.username || ""
+        });
+    }
+}
+
 function advanceTurn(room) {
     if (!room.initiativeOrder?.length) return;
 
-    if (room.counterTurn) {
-        // The Counter turn is over: resume the order that was interrupted.
-        room.turnIndex =
-            room.counterTurn.resumeIndex % room.initiativeOrder.length;
+    const total = room.initiativeOrder.length;
 
+    if (room.counterTurn) {
+        const finished = room.counterTurn;
+
+        if (finished.kind === "devil") {
+            monsters.onMonsterTurnEnd(room, finished.monsterID);
+        }
+
+        // Other Devils may be waiting for the same player's turn to have ended.
+        const pending = (room.pendingBonuses || []).filter(next => {
+            const monster = monsters.getMonster(room, next.monsterID);
+
+            return monster && !monsters.isMonsterDead(monster);
+        });
+
+        room.pendingBonuses = [];
+
+        if (pending.length > 0) {
+            const next = pending.shift();
+
+            room.pendingBonuses = pending;
+
+            startBonusTurn(room, {
+                kind: "devil",
+                monsterID: next.monsterID,
+                playerID: next.playerID,
+                resumeIndex: finished.resumeIndex
+            });
+
+            return;
+        }
+
+        // The bonus turn is over: resume the order that was interrupted.
+        room.turnIndex = finished.resumeIndex % total;
         room.counterTurn = null;
     } else {
         const currentTurn = getCurrentTurn(room);
 
-        // The monster's turn is over: Hex, Shield and Shield Break count down.
+        // A Monster's turn is over: Hex, Shield and Shield Break count down,
+        // and Raging Demon loses a turn.
         if (currentTurn?.type === "monster") {
             cards.tickMonsterTurnEffects(room);
+            monsters.onMonsterTurnEnd(room, currentTurn.id);
         }
 
-        // Counter is a bonus turn after the Monster's turn, whether the monster
-        // attacked, was ended early by the Host, or was skipped by Weaken.
-        // Resolve Counter BEFORE advancing the natural initiative index.
-        // This matters when the monster is the final participant: the Counter
-        // interrupt must run first, then resume at index 0 in the next cycle.
+        const resumeIndex = (room.turnIndex + 1) % total;
+
+        // Counter is a bonus turn after the turn of the Monster it was aimed
+        // at, whether it attacked, was ended early by the Host, or was
+        // weakened. Resolve it BEFORE advancing the natural initiative index.
         if (currentTurn?.type === "monster") {
-            const warrior = findCounteringWarrior(room);
+            const warrior = monsters.findCounteringWarrior(
+                room,
+                currentTurn.id,
+                isDead
+            );
 
             if (warrior) {
-                warrior.counterTurns--;
-
-                room.counterTurn = {
-                    playerID: warrior.id,
-                    // Save the exact natural next turn. If the monster is last,
-                    // this correctly wraps to the first participant.
-                    resumeIndex: (room.turnIndex + 1) % room.initiativeOrder.length
-                };
-
-                room.attackRoll = null;
-                room.monsterHasActed = false;
-                room.monsterAttackedThisTurn = false;
-
-                io.to(room.roomID).emit("counter-turn-started", {
-                    playerID: warrior.id,
-                    username: warrior.username,
-                    counterTurnsLeft: warrior.counterTurns
-                });
+                monsters.consumeWarriorCounter(warrior, currentTurn.id);
 
                 // No Energy regeneration during a Counter turn.
+                startBonusTurn(room, {
+                    kind: "warrior",
+                    playerID: warrior.id,
+                    monsterID: currentTurn.id,
+                    resumeIndex
+                });
+
                 return;
             }
         }
 
-        room.turnIndex =
-            (room.turnIndex + 1) % room.initiativeOrder.length;
+        // A player's own turn ended: every Devil Counter on them fires.
+        if (currentTurn?.type === "player") {
+            const bonuses = monsters.takeDevilCounterBonuses(room, currentTurn.id);
+
+            if (bonuses.length > 0) {
+                const first = bonuses.shift();
+
+                room.pendingBonuses = bonuses;
+
+                startBonusTurn(room, {
+                    kind: "devil",
+                    monsterID: first.monsterID,
+                    playerID: first.playerID,
+                    resumeIndex
+                });
+
+                return;
+            }
+        }
+
+        room.turnIndex = resumeIndex;
     }
 
     // Skip anyone who is dead.
     skipDeadTurns(room);
 
-    room.attackRoll = null;
-    room.monsterHasActed = false;
-    room.monsterAttackedThisTurn = false;
+    resetTurnFlags(room);
 
     beginTurn(room);
 }
@@ -827,9 +738,7 @@ function beginTurn(room) {
 
         skipDeadTurns(room);
 
-        room.attackRoll = null;
-        room.monsterHasActed = false;
-        room.monsterAttackedThisTurn = false;
+        resetTurnFlags(room);
     }
 }
 
@@ -849,22 +758,30 @@ function isMonstersTurn(room) {
 
 // Clears every per-encounter effect on the room and its players.
 function resetEncounterEffects(room) {
-    room.attackRoll = null;
-    room.monsterHasActed = false;
-    room.monsterAttackedThisTurn = false;
+    resetTurnFlags(room);
+
     room.taunt = null;
     room.weaken = 0;
     room.counterTurn = null;
+
+    monsters.resetRoomEffects(room);
 
     for (const player of room.players.values()) {
         player.energy = STARTING_ENERGY;
         player.marks = new Set();
         player.counterTurns = 0;
+        player.counters = {};
     }
 
     // Charges, Rest, Shield Break, Hex and Shield.
     cards.resetCardState(room);
 }
+
+/*
+    Up to eight take part (five players, three Monsters). Every participant
+    gets a UNIQUE number from 1 to 8: number 1 acts first, number 8 last.
+*/
+const INITIATIVE_NUMBERS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 function startInitiative(room) {
     const participants = [];
@@ -879,22 +796,16 @@ function startInitiative(room) {
         });
     }
 
-    participants.push({
-        id: "monster",
-        type: "monster",
-        username: room.encounter.name,
-        className: "Monster",
-        initiative: 0
-    });
+    participants.push(...monsters.getParticipants(room));
 
-    const numbers = shuffle([1, 2, 3, 4, 5, 6]);
+    const numbers = shuffle(INITIATIVE_NUMBERS);
 
     participants.forEach((participant, index) => {
         participant.initiative = numbers[index];
     });
 
     participants.sort(
-        (a, b) => b.initiative - a.initiative
+        (a, b) => a.initiative - b.initiative
     );
 
     room.initiativeOrder = participants;
@@ -903,10 +814,20 @@ function startInitiative(room) {
     // Everyone starts with 5 Energy and no leftover effects.
     resetEncounterEffects(room);
 
-    room.encounter.curses = new Set();
-
     // Anyone who is already dead does not get to go first.
     skipDeadTurns(room);
+
+    // Every screen plays the octagon animation with this result.
+    io.to(room.roomID).emit("initiative-rolled", {
+        order: participants.map(participant => ({
+            id: participant.id,
+            type: participant.type,
+            username: participant.username,
+            className: participant.className,
+            species: participant.species || null,
+            initiative: participant.initiative
+        }))
+    });
 }
 
 function removePlayerFromInitiative(room, playerID) {
@@ -936,12 +857,16 @@ function removePlayerFromInitiative(room, playerID) {
             room.turnIndex = 0;
         }
 
-        room.attackRoll = null;
-        room.monsterHasActed = false;
+        resetTurnFlags(room);
     }
 
-    // The Warrior left in the middle of their Counter turn.
-    if (counter && counter.playerID === playerID) {
+    // The Warrior left in the middle of their Counter turn, or the player a
+    // Devil's bonus action was for left: the bonus is over.
+    if (
+        counter &&
+        (counter.playerID === playerID) &&
+        (counter.kind === "warrior" || counter.kind === "devil")
+    ) {
         room.counterTurn = null;
 
         if (room.initiativeOrder.length > 0) {
@@ -949,9 +874,16 @@ function removePlayerFromInitiative(room, playerID) {
                 counter.resumeIndex % room.initiativeOrder.length;
         }
 
-        room.attackRoll = null;
-        room.monsterHasActed = false;
+        resetTurnFlags(room);
     }
+
+    // Counters aimed at or owned by someone who left are void.
+    room.devilCounters = (room.devilCounters || []).filter(
+        entry => entry.playerID !== playerID
+    );
+    room.pendingBonuses = (room.pendingBonuses || []).filter(
+        entry => entry.playerID !== playerID
+    );
 
     if (room.initiativeOrder.length === 0) {
         room.turnIndex = 0;
@@ -985,28 +917,40 @@ function isPlayer(socket, room) {
    CONNECTION
 ===================================== */
 
-// Everything cards-server.js needs from the core game.
-cards.init({
+// Everything cards-server.js and monster-server.js need from the core game.
+const sharedContext = {
     io,
     rooms,
     MAX_ENERGY,
     randomInt: (min, max) => crypto.randomInt(min, max),
     shuffle,
     getActingPlayer,
+    getCurrentTurn,
     isPlayer,
+    isHost,
     isDead,
     isHittable,
     getHittablePositions,
-    getHealthyMonsterPositions,
-    getStatusTargetPositions,
     calculateCardPositions,
-    damageMonsterCells,
-    stripMonsterDefenses,
     emitToPlayersAndHost,
     emitTurnState,
+    updateEncounter,
+    updateRoom,
+    sendPlayerState,
+    resetEncounterEffects,
     finishPlayerAction,
-    advanceTurn
-});
+    advanceTurn,
+
+    // The Monster half: damage and targeting go through monster-server.js.
+    monsters,
+    damageMonsterCells: monsters.damageMonsterCells,
+    stripMonsterDefenses: monsters.stripMonsterDefenses,
+    getHealthyMonsterPositions: monsters.getHealthyMonsterPositions,
+    getStatusTargetPositions: monsters.getStatusTargetPositions
+};
+
+cards.init(sharedContext);
+monsters.init(sharedContext);
 
 io.on("connection", socket => {
     console.log("Connected:", socket.id);
@@ -1031,12 +975,12 @@ io.on("connection", socket => {
             roomID,
             host: socket.id,
             players: new Map(),
-            encounter: null,
-            attackRoll: null,
+            encounter: monsters.createEncounterState(),
+            monsterTurn: null,
+            devilCounters: [],
+            pendingBonuses: [],
             initiativeOrder: [],
             turnIndex: 0,
-            monsterHasActed: false,
-            monsterAttackedThisTurn: false,
             counterTurn: null,
             weaken: 0,
             taunt: null,
@@ -1432,132 +1376,20 @@ io.on("connection", socket => {
     });
 
     /* =====================================
-       CREATE ENCOUNTER
-    ===================================== */
-
-    socket.on("create-encounter", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        if (!isHost(socket, room)) {
-            socket.emit(
-                "encounter-error",
-                "Only the Host can create monsters."
-            );
-
-            return;
-        }
-
-        if (room.encounter?.active) {
-            socket.emit(
-                "encounter-error",
-                "End the current encounter first."
-            );
-
-            return;
-        }
-
-        const name = String(data?.name || "").trim();
-        const size = Number(data?.size);
-
-        if (!name || name.length > 24) {
-            socket.emit(
-                "encounter-error",
-                "Monster name must be 1–24 characters."
-            );
-
-            return;
-        }
-
-        if (![3, 5, 7].includes(size)) {
-            socket.emit(
-                "encounter-error",
-                "Invalid monster grid size."
-            );
-
-            return;
-        }
-
-        room.encounter = {
-            name,
-            size,
-            grid: createGrid(size),
-            active: false,
-            curses: new Set()
-        };
-
-        room.initiativeOrder = [];
-        room.turnIndex = 0;
-
-        resetEncounterEffects(room);
-
-        socket.emit(
-            "encounter-created",
-            "Monster encounter created."
-        );
-
-        updateEncounter(roomID);
-        updateRoom(roomID);
-
-        console.log(
-            "Monster successfully created:",
-            room.encounter
-        );
-    });
-
-    /* =====================================
-       HOST PAINTS MONSTER CELLS (Overheal / Armor)
-    ===================================== */
-
-    socket.on("edit-monster-cell", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        if (!isHost(socket, room)) return;
-
-        const encounter = room.encounter;
-
-        if (!encounter || encounter.active) {
-            socket.emit(
-                "encounter-error",
-                "Monster cells can only be changed before the encounter starts."
-            );
-
-            return;
-        }
-
-        const index = Number(data?.index);
-        const state = String(data?.state || "");
-
-        if (
-            !Number.isInteger(index) ||
-            index < 0 ||
-            index >= encounter.grid.length ||
-            !MONSTER_SETUP_STATES.includes(state)
-        ) {
-            return;
-        }
-
-        encounter.grid[index] = state;
-        encounter.curses.delete(index);
-
-        updateEncounter(roomID);
-    });
-
-    /* =====================================
        START ENCOUNTER
     ===================================== */
 
+    // The bench itself (add / remove / paint a Monster) is in monster-server.js.
     socket.on("start-encounter", () => {
         const roomID = socket.data.roomID;
         const room = rooms.get(roomID);
 
         if (!isHost(socket, room)) return;
 
-        if (!room.encounter) {
+        if (monsters.getMonsters(room).length === 0) {
             socket.emit(
                 "encounter-error",
-                "Create a monster first."
+                "Put at least one Monster on the bench first."
             );
 
             return;
@@ -1581,6 +1413,8 @@ io.on("connection", socket => {
             return;
         }
 
+        monsters.beginEncounter(room);
+
         room.encounter.active = true;
 
         startInitiative(room);
@@ -1588,7 +1422,7 @@ io.on("connection", socket => {
 
         console.log(
             "Encounter started:",
-            room.encounter.name
+            monsters.getMonsters(room).map(monster => monster.name).join(", ")
         );
     });
 
@@ -1596,14 +1430,17 @@ io.on("connection", socket => {
        END ENCOUNTER
     ===================================== */
 
+    // Stops the fight early and returns to setup: the Monsters keep their
+    // names, Species and the grids the Host painted.
     socket.on("end-encounter", () => {
         const roomID = socket.data.roomID;
         const room = rooms.get(roomID);
 
-        if (!isHost(socket, room) || !room.encounter) return;
+        if (!isHost(socket, room) || !room.encounter?.active) return;
 
         room.encounter.active = false;
-        room.encounter.curses = new Set();
+
+        monsters.finishEncounter(room);
 
         room.initiativeOrder = [];
         room.turnIndex = 0;
@@ -1644,6 +1481,7 @@ io.on("connection", socket => {
         player.energy = STARTING_ENERGY;
         player.marks = new Set();
         player.counterTurns = 0;
+        player.counters = {};
         cards.resetPlayerCardState(player);
 
         if (room.shield?.targetID === player.id) {
@@ -1695,6 +1533,7 @@ io.on("connection", socket => {
        MONSTER ENDS TURN
     ===================================== */
 
+    // Rolling dice and acting (attack, heal, armor ...) is in monster-server.js.
     socket.on("end-monster-turn", () => {
         const roomID = socket.data.roomID;
         const room = rooms.get(roomID);
@@ -1707,353 +1546,38 @@ io.on("connection", socket => {
         ) {
             socket.emit(
                 "turn-error",
-                "It is not the monster's turn."
+                "It is not a Monster's turn."
             );
 
             return;
         }
 
-        // Ending the turn early forfeits any unused positions from the roll.
-        // advanceTurn checks monsterAttackedThisTurn BEFORE changing the natural
-        // initiative index, so a Counter is never skipped when the Monster is last.
-        // Do not clear the marker here: advanceTurn owns its consumption/reset.
-        room.attackRoll = null;
-        advanceTurn(room);
-        emitTurnState(roomID);
-    });
+        // Devil's Counter bonus action must use its restricted attack.
+        const turn = monsters.ensureMonsterTurn(room);
+        const turnInfo = getCurrentTurn(room);
 
-    /* =====================================
-       MONSTER D10
-    ===================================== */
+        if (turnInfo?.bonus && turn) {
+            const attack = turn.dice.find(die => die.type === "attack");
 
-    socket.on("roll-monster-d10", () => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        if (!isHost(socket, room)) return;
-
-        if (
-            !room.encounter?.active ||
-            !isMonstersTurn(room)
-        ) {
-            socket.emit(
-                "monster-attack-error",
-                "It is not the monster's turn."
+            const someoneToHit = Array.from(room.players.values()).some(
+                member =>
+                    getHittablePositions(member.grid).length > 0 &&
+                    !cards.isShielded(room, member)
             );
 
-            return;
-        }
-
-        if (room.monsterHasActed) {
-            socket.emit(
-                "monster-attack-error",
-                "The monster has already acted this turn."
-            );
-
-            return;
-        }
-
-        if (room.attackRoll !== null) {
-            socket.emit(
-                "monster-attack-error",
-                "Resolve the current attack first."
-            );
-
-            return;
-        }
-
-        const rolled = crypto.randomInt(1, 11);
-
-        // Each Weaken point fully negates one selectable monster attack
-        // position. Any unused negation carries into the next monster turn.
-        const weaken = Math.max(0, Number(room.weaken) || 0);
-
-        if (weaken > 0) {
-            const positionsNegated = Math.min(weaken, rolled);
-            const effective = Math.max(0, rolled - positionsNegated);
-
-            room.weaken = weaken - positionsNegated;
-
-            const info = {
-                monsterName: room.encounter.name,
-                roll: rolled,
-                positionsNegated,
-                absorbed: positionsNegated, // compatibility with existing clients
-                effective,
-                skipped: effective === 0,
-                weakenLeft: room.weaken
-            };
-
-            if (effective <= 0) {
-                // Every rolled attack position was negated; the monster skips its turn.
-                io.to(roomID).emit("monster-weakened", info);
-
-                advanceTurn(room);
-                emitTurnState(roomID);
-
-                return;
-            }
-
-            room.attackRoll = effective;
-
-            socket.emit("monster-d10-result", effective);
-            io.to(roomID).emit("monster-weakened", info);
-
-            updateEncounter(roomID);
-
-            return;
-        }
-
-        room.attackRoll = rolled;
-
-        socket.emit("monster-d10-result", rolled);
-    });
-
-    /* =====================================
-       MONSTER ATTACK
-    ===================================== */
-
-    socket.on("monster-attack", data => {
-        const roomID = socket.data.roomID;
-        const room = rooms.get(roomID);
-
-        if (!isHost(socket, room)) return;
-
-        if (
-            !room.encounter?.active ||
-            !isMonstersTurn(room)
-        ) {
-            socket.emit(
-                "monster-attack-error",
-                "It is not the monster's turn."
-            );
-
-            return;
-        }
-
-        if (room.monsterHasActed) {
-            socket.emit(
-                "monster-attack-error",
-                "The monster has already acted this turn."
-            );
-
-            return;
-        }
-
-        if (room.attackRoll === null) {
-            socket.emit(
-                "monster-attack-error",
-                "Roll the D10 before attacking."
-            );
-
-            return;
-        }
-
-        // =================================
-        // TAUNT ENFORCEMENT
-        // =================================
-
-        if (room.taunt) {
-            const tank = room.players.get(room.taunt.tankID);
-
-            // Remove Taunt if the Tank is gone or has no hittable HP.
-            if (
-                !tank ||
-                getHittablePositions(tank.grid).length === 0
-            ) {
-                room.taunt = null;
-                updateEncounter(roomID);
-            } else if (
-                !cards.isTauntPaused(room, tank) &&
-                data?.playerID !== tank.id
-            ) {
+            if (attack && !attack.rolled && someoneToHit) {
                 socket.emit(
                     "monster-attack-error",
-                    `Taunt is active! You must target ${tank.username}.`
+                    "Counter bonus action: the Monster must use its restricted attack."
                 );
 
                 return;
             }
         }
 
-        const player = room.players.get(data?.playerID);
-        const positions = data?.positions;
-
-        if (!player) {
-            socket.emit(
-                "monster-attack-error",
-                "Target player not found."
-            );
-
-            return;
-        }
-
-        if (cards.isShielded(room, player)) {
-            socket.emit(
-                "monster-attack-error",
-                `${player.username} is Shielded and cannot be targeted.`
-            );
-
-            return;
-        }
-
-        const hittableCount = getHittablePositions(player.grid).length;
-
-        if (hittableCount === 0) {
-            socket.emit(
-                "monster-attack-error",
-                `${player.username} has no HP left to hit. Pick another target.`
-            );
-
-            return;
-        }
-
-        // A paused Taunt (Tank resting) doesn't force or soak anything.
-        const tauntedTank =
-            room.taunt &&
-            room.taunt.tankID === player.id &&
-            !cards.isTauntPaused(room, player);
-
-        let maxCount = Math.min(
-            room.attackRoll,
-            hittableCount
-        );
-
-        // The hit is capped by the remaining Taunt only if the Tank
-        // is the forced target; the monster can't hit past what is taunted.
-        if (tauntedTank) {
-            maxCount = Math.min(
-                maxCount,
-                room.taunt.remainingDamage
-            );
-        }
-
-        if (
-            !Array.isArray(positions) ||
-            positions.length < 1 ||
-            positions.length > maxCount ||
-            new Set(positions).size !== positions.length ||
-            positions.some(position =>
-                !Number.isInteger(position) ||
-                position < 0 ||
-                position >= player.grid.length ||
-                !isHittable(player.grid[position])
-            )
-        ) {
-            socket.emit(
-                "monster-attack-error",
-                `Select between 1 and ${maxCount} hittable positions.`
-            );
-
-            return;
-        }
-
-        let damage = 0;
-        let overhealDamage = 0;
-        let retaliations = 0;
-
-        // For the hit animation: which cells lost HP, which lost Overheal.
-        const emptiedPositions = [];
-        const overhealLostPositions = [];
-
-        positions.forEach(position => {
-            if (player.grid[position] === "overheal") {
-                player.grid[position] = "hp";
-                overhealDamage++;
-                overhealLostPositions.push(position);
-            } else if (player.grid[position] === "hp") {
-                player.grid[position] = "empty";
-                damage++;
-                emptiedPositions.push(position);
-
-                // A damaged Retaliate mark strikes back (once).
-                if (player.marks?.has(position)) {
-                    player.marks.delete(position);
-                    retaliations++;
-                }
-            }
-        });
-
-        let tauntRemaining = null;
-
-        if (tauntedTank) {
-            room.taunt.remainingDamage -= positions.length;
-
-            if (room.taunt.remainingDamage <= 0) {
-                room.taunt = null;
-                tauntRemaining = 0;
-            } else {
-                tauntRemaining = room.taunt.remainingDamage;
-            }
-        }
-
-        // The D10 roll is a pool of positions. Spend what was used
-        // and keep the rest for more attacks this turn.
-        const rolled = room.attackRoll;
-
-        let remaining = rolled - positions.length;
-
-        // If nobody has HP left to hit, the leftover is lost.
-        const anyoneHittable = Array.from(room.players.values()).some(
-            member =>
-                getHittablePositions(member.grid).length > 0 &&
-                !cards.isShielded(room, member)
-        );
-
-        if (!anyoneHittable) {
-            remaining = 0;
-        }
-
-        const result = {
-            playerID: player.id,
-            username: player.username,
-            positions,
-            emptiedPositions,
-            overhealLostPositions,
-            roll: rolled,
-            remaining: Math.max(0, remaining),
-            damage,
-            overhealDamage,
-            tauntRemaining
-        };
-
-        if (remaining > 0) {
-            room.attackRoll = remaining;
-        } else {
-            room.attackRoll = null;
-            room.monsterHasActed = true;
-        }
-
-        // The monster attacked this turn, so Counter can trigger later.
-        room.monsterAttackedThisTurn = true;
-
-        io.to(roomID).emit(
-            "monster-attack-resolved",
-            result
-        );
-
-        // Retaliate: each damaged mark hits a random healthy monster position.
-        if (retaliations > 0) {
-            const targets = shuffle(
-                getHealthyMonsterPositions(room.encounter)
-            ).slice(0, retaliations);
-
-            const hit = damageMonsterCells(room, targets, "retaliate");
-
-            // Only players are told (the Host can't see the marks).
-            for (const member of room.players.values()) {
-                io.to(member.id).emit("retaliate-triggered", {
-                    playerID: player.id,
-                    username: player.username,
-                    triggered: retaliations,
-                    damage: hit.damage
-                });
-            }
-        }
-
-        sendPlayerState(player);
-        updateRoom(roomID);
-        updateEncounter(roomID);
+        // Ending the turn early forfeits anything left from the dice.
+        advanceTurn(room);
+        emitTurnState(roomID);
     });
 
     /* =====================================
@@ -2063,6 +1587,10 @@ io.on("connection", socket => {
     // Every card handler (player-attack, player-heal, player-rest ...)
     // is registered by cards-server.js.
     cards.registerSocketHandlers(socket);
+
+    // Every Monster action (bench, dice, attack ...) is registered by
+    // monster-server.js.
+    monsters.registerSocketHandlers(socket);
 
     /* =====================================
        DISCONNECT

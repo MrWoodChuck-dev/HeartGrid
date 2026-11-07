@@ -117,56 +117,16 @@
                     <p id="host-message" class="status-message"></p>
                 </div>
 
-                <!-- MONSTER ENCOUNTER -->
+                <!-- MONSTER ENCOUNTER: the creator and the Bench are built by monster.js -->
                 <div class="host-section" id="monster-encounter-section">
                     <h2>MONSTER ENCOUNTER</h2>
 
                     <p class="section-description">
-                        Create an encounter and configure the monster's battlefield.
+                        Pick a Species, name it, choose its HP grid and drag it onto
+                        the Bench. Up to three Monsters can fight together.
                     </p>
 
-                    <label for="monster-name">MONSTER NAME</label>
-                    <input
-                        type="text"
-                        id="monster-name"
-                        placeholder="Enter monster name"
-                        maxlength="24"
-                        autocomplete="off"
-                    >
-
-                    <label for="monster-grid-size">MONSTER GRID SIZE</label>
-                    <select id="monster-grid-size">
-                        <option value="3">3×3</option>
-                        <option value="5">5×5</option>
-                        <option value="7">7×7</option>
-                    </select>
-
-                    <button id="create-encounter-button" class="primary-button">
-                        CREATE ENCOUNTER
-                    </button>
-
-                    <div id="monster-encounter-info" hidden>
-                        <div class="encounter-heading">
-                            <h3 id="active-monster-name">Monster</h3>
-                            <p id="monster-encounter-status">Encounter created.</p>
-                        </div>
-
-                        <div class="host-monster-grid-container">
-                            <h3>MONSTER GRID</h3>
-                            <div id="host-monster-grid" class="heart-grid"></div>
-                            <p id="monster-setup-hint" class="monster-setup-hint" hidden>
-                                Click a cell to cycle it: HP, Armor, Overheal, Armor over Overheal.
-                            </p>
-                        </div>
-
-                        <button id="start-encounter-button" class="primary-button">
-                            START ENCOUNTER
-                        </button>
-
-                        <button id="end-encounter-button" class="primary-button" disabled>
-                            END ENCOUNTER
-                        </button>
-                    </div>
+                    <div id="monster-creator-root"></div>
 
                     <p id="monster-encounter-message" class="status-message"></p>
                 </div>
@@ -200,47 +160,9 @@
                     </button>
                 </div>
 
-                <!-- The original attack controls and party grids. They are no longer
-                     shown, but they still hold the attack rules (roll, taunt, weaken,
-                     position limits) that the Battlefield Management panel drives. -->
+                <!-- The party grids (hidden). Monster dice and attacks live in
+                     host-battle.js and monster-server.js. -->
                 <div id="host-engine" hidden>
-                <!-- MONSTER ATTACK -->
-                <div class="host-section" id="monster-attack-section">
-                    <h2>MONSTER ATTACK</h2>
-
-                    <p class="section-description">
-                        Roll a D10 to determine how many positions the monster can target.
-                    </p>
-
-                    <div class="dice-display">
-                        <span class="dice-label">D10 RESULT</span>
-                        <strong id="monster-d10-result">?</strong>
-                    </div>
-
-                    <button id="roll-monster-d10-button" class="primary-button" disabled>
-                        ROLL D10
-                    </button>
-
-                    <label for="monster-target-player">SELECT TARGET PLAYER</label>
-                    <select id="monster-target-player" disabled>
-                        <option value="">Select a player</option>
-                    </select>
-
-                    <p id="monster-target-count">Positions remaining: 0</p>
-
-                    <p class="section-description">
-                        Select the target positions on the player's grid.
-                    </p>
-
-                    <div id="host-target-grid" class="heart-grid"></div>
-
-                    <button id="confirm-monster-attack-button" class="primary-button" disabled>
-                        CONFIRM MONSTER ATTACK
-                    </button>
-
-                    <p id="monster-attack-message" class="status-message"></p>
-                </div>
-
                 <!-- PARTY STATUS -->
                 <div class="host-section">
                     <h2>PARTY STATUS</h2>
@@ -466,17 +388,9 @@
                             </p>
                         </section>
 
-                        <!-- COMBAT ARENA (kept in sync for the rest of the game, but
-                             hidden: the battlefield above replaces it) -->
+                        <!-- COMBAT ARENA (your own grid, kept in sync but hidden:
+                             the battlefield above replaces it) -->
                         <div class="combat-arena legacy-arena" aria-hidden="true">
-
-                            <section class="combat-monster-panel">
-                                <h2>MONSTER</h2>
-                                <h3 id="combat-monster-name">No monster</h3>
-                                <p id="combat-monster-status">No active encounter.</p>
-
-                                <div id="monster-grid" class="heart-grid monster-grid"></div>
-                            </section>
 
                             <section class="combat-party-panel">
                                 <h2>YOUR PARTY</h2>
@@ -561,8 +475,12 @@
 
 <!-- LOAD SOCKET.IO AND THE MAIN GAME SCRIPT -->
 <script src="/socket.io/socket.io.js"></script>
+<script src="monster-species.js"></script>
 <script src="cards.js"></script>
 <script src="script.js"></script>
+
+<!-- MONSTERS: creator, bench, targeting, initiative octagon -->
+<script src="monster.js"></script>
 
 <!-- ACTION STAGE (card -> explosion -> grid animation) AND BATTLEFIELD -->
 <script src="stage.js"></script>
@@ -615,6 +533,10 @@
                 item.classList.add("active-turn");
             }
 
+            if (participant.type === "monster" && getMonsterByID(participant.id)?.dead) {
+                item.classList.add("is-dead");
+            }
+
             const number = document.createElement("strong");
             number.className = "initiative-number";
             number.textContent = participant.initiative;
@@ -627,7 +549,7 @@
 
             const role = document.createElement("span");
             role.textContent = participant.type === "monster"
-                ? "MONSTER"
+                ? `${participant.className} · MONSTER`
                 : participant.className;
 
             details.append(name, role);
@@ -637,12 +559,18 @@
             // Counter is a bonus turn immediately after the Monster's turn.
             if (participant.type === "monster") {
                 (encounter?.counterPlayers || []).forEach(counter => {
-                    const count = (counter.counterTurns || 0) + (counter.active ? 1 : 0);
+                    // Only the Warriors waiting on THIS Monster.
+                    const waiting = counter.counters?.[participant.id] || 0;
+                    const active = Boolean(
+                        counter.active &&
+                        encounter?.currentTurn?.counterMonsterID === participant.id
+                    );
+                    const count = waiting + (active ? 1 : 0);
                     if (count <= 0) return;
 
                     const bonus = document.createElement("div");
                     bonus.className = "initiative-player counter-initiative";
-                    if (counter.active) bonus.classList.add("active-turn");
+                    if (active) bonus.classList.add("active-turn");
 
                     const bonusNumber = document.createElement("strong");
                     bonusNumber.className = "initiative-number";
@@ -682,18 +610,13 @@
         );
 
         const currentText = active && turn
-            ? `CURRENT TURN: ${turn.username}${turn.counter ? " — COUNTER BONUS TURN" : ""}`
+            ? `CURRENT TURN: ${turn.username}${turn.counter ? " — COUNTER BONUS TURN" : turn.bonus ? " — COUNTER BONUS ACTION" : ""}`
             : active
                 ? "Waiting for a turn..."
                 : "Waiting for encounter...";
 
         initiativeElements.host.current.textContent = currentText;
         initiativeElements.player.current.textContent = currentText;
-
-        const hostWeakenStatus = document.getElementById("monster-attack-message");
-        if (currentRole === "host" && hostWeakenStatus && (encounter?.weaken || 0) > 0 && monsterAttackRoll === null) {
-            hostWeakenStatus.textContent = `WEAKEN ACTIVE: ${encounter.weaken} monster attack position(s) will be negated on its next roll.`;
-        }
 
         const isMyTurn =
             currentRole === "player" &&
