@@ -234,6 +234,10 @@ function getEncounterState(room) {
         maxMonsters: monsters.MAX_MONSTERS,
 
         initiativeOrder: room.initiativeOrder || [],
+
+        // Which pass through the initiative order we are on. Durations
+        // (Hex, Shield, Shield Break, Raging Demon) count rounds.
+        round: room.encounter.active ? room.round || 1 : 0,
         currentTurn: getCurrentTurn(room),
 
         // What the current Monster has rolled / spent this turn.
@@ -496,6 +500,42 @@ function isDead(player) {
 
 // Dead players lose their turn, and so do defeated Monsters. The loop is
 // bounded by the number of participants, so it always ends.
+/*
+    ROUNDS. One round is one full pass through the initiative order: it ends
+    when the turn order wraps from the last participant back to the first.
+    Effects that last a number of "turns" (Hex, Shield, Shield Break, Raging
+    Demon) count ROUNDS, not individual turns. They do not lose anything in
+    the round they were made: they start counting in the next round, so
+    an effect with a duration of 2 made in round 1 is gone after round 3.
+*/
+function endRound(room) {
+    const finished = room.round || 1;
+
+    cards.tickRoundEffects(room, finished);
+    monsters.onRoundEnd(room, finished);
+
+    room.round = finished + 1;
+
+    io.to(room.roomID).emit("round-started", { round: room.round });
+}
+
+// Moves the turn pointer. Wrapping past the last participant ends the round.
+function setTurnIndex(room, index) {
+    const total = room.initiativeOrder?.length || 0;
+
+    if (total === 0) return;
+
+    const next = ((index % total) + total) % total;
+
+    // Always called for a step FORWARD, so landing on or before where we
+    // were means the order wrapped around.
+    const wrapped = next <= room.turnIndex;
+
+    room.turnIndex = next;
+
+    if (wrapped) endRound(room);
+}
+
 function isParticipantOut(room, participant) {
     if (participant?.type === "monster") {
         const monster = monsters.getMonster(room, participant.id);
@@ -519,7 +559,7 @@ function skipDeadTurns(room) {
 
         if (!isParticipantOut(room, turn)) return;
 
-        room.turnIndex = (room.turnIndex + 1) % total;
+        setTurnIndex(room, room.turnIndex + 1);
     }
 }
 
@@ -610,7 +650,7 @@ function advanceTurn(room) {
         const finished = room.counterTurn;
 
         if (finished.kind === "devil") {
-            monsters.onMonsterTurnEnd(room, finished.monsterID);
+            monsters.onMonsterTurnEnd(room);
         }
 
         // Other Devils may be waiting for the same player's turn to have ended.
@@ -638,16 +678,16 @@ function advanceTurn(room) {
         }
 
         // The bonus turn is over: resume the order that was interrupted.
-        room.turnIndex = finished.resumeIndex % total;
         room.counterTurn = null;
+
+        // resumeIndex is "the next participant": past the end means a new round.
+        setTurnIndex(room, finished.resumeIndex);
     } else {
         const currentTurn = getCurrentTurn(room);
 
-        // A Monster's turn is over: Hex, Shield and Shield Break count down,
-        // and Raging Demon loses a turn.
+        // A Monster's turn is over. (Durations count rounds, see endRound.)
         if (currentTurn?.type === "monster") {
-            cards.tickMonsterTurnEffects(room);
-            monsters.onMonsterTurnEnd(room, currentTurn.id);
+            monsters.onMonsterTurnEnd(room);
         }
 
         const resumeIndex = (room.turnIndex + 1) % total;
@@ -697,7 +737,7 @@ function advanceTurn(room) {
             }
         }
 
-        room.turnIndex = resumeIndex;
+        setTurnIndex(room, resumeIndex);
     }
 
     // Skip anyone who is dead.
@@ -734,7 +774,7 @@ function beginTurn(room) {
         cards.processRestTurn(room, player);
 
         // Sleep through the turn.
-        room.turnIndex = (room.turnIndex + 1) % total;
+        setTurnIndex(room, room.turnIndex + 1);
 
         skipDeadTurns(room);
 
@@ -810,6 +850,7 @@ function startInitiative(room) {
 
     room.initiativeOrder = participants;
     room.turnIndex = 0;
+    room.round = 1;
 
     // Everyone starts with 5 Energy and no leftover effects.
     resetEncounterEffects(room);
@@ -981,6 +1022,7 @@ io.on("connection", socket => {
             pendingBonuses: [],
             initiativeOrder: [],
             turnIndex: 0,
+            round: 0,
             counterTurn: null,
             weaken: 0,
             taunt: null,
@@ -1444,6 +1486,7 @@ io.on("connection", socket => {
 
         room.initiativeOrder = [];
         room.turnIndex = 0;
+        room.round = 0;
 
         resetEncounterEffects(room);
 

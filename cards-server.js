@@ -186,7 +186,7 @@ function createPlayerCardState() {
         },
         // Rest turns left. While above 0 the player sleeps through their turns.
         rest: 0,
-        // Turns (monster turns) left before this player can be Shielded again.
+        // Rounds left before this player can be Shielded again.
         shieldBreak: 0
     };
 }
@@ -498,15 +498,27 @@ function describeAttackResult(room, monster, player, card, cost, outcome) {
 ===================================== */
 
 /*
-    The monster's turn has just ended. Hex, Shield and Shield Break all count
-    down in monster turns, so a Shield of 2 stops exactly two monster turns.
+    A ROUND has just ended (everyone in the initiative order has had their
+    turn). Hex, Shield and Shield Break count down in ROUNDS, not in anyone's
+    individual turn.
+
+    An effect made during round R does not lose anything at the end of round
+    R: it starts counting in round R + 1. So a Shield of 2 cast in round 1
+    protects through rounds 2 and 3 and is gone when round 3 ends.
+
+    finishedRound is the number of the round that just ended.
 */
-function tickMonsterTurnEffects(room) {
+function tickRoundEffects(room, finishedRound) {
     for (const player of room.players.values()) {
-        if (player.shieldBreak > 0) player.shieldBreak--;
+        if (
+            player.shieldBreak > 0 &&
+            finishedRound > (player.shieldBreakStart ?? 0)
+        ) {
+            player.shieldBreak--;
+        }
     }
 
-    if (room.hex) {
+    if (room.hex && finishedRound > (room.hex.startRound ?? 0)) {
         room.hex.remaining--;
 
         if (room.hex.remaining <= 0) {
@@ -516,7 +528,7 @@ function tickMonsterTurnEffects(room) {
         }
     }
 
-    if (room.shield) {
+    if (room.shield && finishedRound > (room.shield.startRound ?? 0)) {
         room.shield.remaining--;
 
         if (room.shield.remaining <= 0) {
@@ -527,7 +539,12 @@ function tickMonsterTurnEffects(room) {
 
             const breakTurns = SHIELD_BREAK_TURNS[total] || 4;
 
-            if (target) target.shieldBreak = breakTurns;
+            if (target) {
+                target.shieldBreak = breakTurns;
+
+                // Counts from the next round, like every other duration.
+                target.shieldBreakStart = finishedRound;
+            }
 
             ctx.io.to(room.roomID).emit("shield-expired", {
                 targetID,
@@ -1076,7 +1093,8 @@ function registerSocketHandlers(socket) {
             supportID: player.id,
             targetID: target.id,
             remaining: card.targetCount,
-            total: card.targetCount
+            total: card.targetCount,
+            startRound: room.round || 1
         };
 
         ctx.emitToPlayersAndHost(room, "player-shield-resolved", {
@@ -1123,10 +1141,14 @@ function registerSocketHandlers(socket) {
         player.energy -= cost;
 
         // Hex does not stack: a second Hex only refreshes it if it lasts longer.
-        room.hex = {
-            remaining: Math.max(room.hex?.remaining || 0, card.targetCount),
-            casterID: player.id
-        };
+        // A longer Hex replaces it and starts counting next round.
+        if (!room.hex || card.targetCount > room.hex.remaining) {
+            room.hex = {
+                remaining: card.targetCount,
+                casterID: player.id,
+                startRound: room.round || 1
+            };
+        }
 
         ctx.emitToPlayersAndHost(room, "player-hex-resolved", {
             playerID: player.id,
@@ -1832,7 +1854,7 @@ module.exports = {
     resetCardState,
 
     // Turn hooks
-    tickMonsterTurnEffects,
+    tickRoundEffects,
     processRestTurn,
 
     // Wiring

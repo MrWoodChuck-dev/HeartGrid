@@ -151,6 +151,7 @@ function resetMonsterCombatState(monster) {
     monster.taunt = 0;
     monster.advantage = 0;
     monster.rage = 0;
+    monster.rageStart = 0;
     monster.ultimateUses = 0;
 }
 
@@ -948,15 +949,17 @@ function clearMonsterTurn(room) {
 }
 
 // A Monster's turn (normal or bonus) just ended.
-function onMonsterTurnEnd(room, monsterID) {
-    const monster = getMonster(room, monsterID);
-
+function onMonsterTurnEnd(room) {
     room.monsterTurn = null;
+}
 
-    if (!monster || monster.dead) return;
+// A round just ended: Raging Demon counts rounds, starting the round after
+// it was rolled.
+function onRoundEnd(room, finishedRound) {
+    getMonsters(room).forEach(monster => {
+        if (monster.dead || monster.rage <= 0) return;
+        if (finishedRound <= (monster.rageStart ?? 0)) return;
 
-    // Raging Demon counts Devil's turns.
-    if (monster.rage > 0) {
         monster.rage--;
 
         if (monster.rage <= 0) {
@@ -966,7 +969,7 @@ function onMonsterTurnEnd(room, monsterID) {
                 effect: "Raging Demon"
             });
         }
-    }
+    });
 }
 
 // Applies one hit to a player's cell. Shared by attacks and Raging Demon.
@@ -1268,6 +1271,7 @@ function registerSocketHandlers(socket) {
 
             if (ultimate.id === "raging-demon") {
                 monster.rage = value;
+                monster.rageStart = room.round || 1;
                 die.done = true;
 
                 emitAction(room, monster, "raging-demon", { ...detail, rage: monster.rage });
@@ -1922,6 +1926,7 @@ module.exports = {
     getPublicMonsterTurn,
     clearMonsterTurn,
     onMonsterTurnEnd,
+    onRoundEnd,
 
     // Wiring
     init,

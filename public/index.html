@@ -10,6 +10,7 @@
     <title>Heart Grid</title>
 
     <link rel="stylesheet" href="style.css">
+    <script src="theme.js"></script>
 </head>
 
 <body>
@@ -610,7 +611,7 @@
         );
 
         const currentText = active && turn
-            ? `CURRENT TURN: ${turn.username}${turn.counter ? " — COUNTER BONUS TURN" : turn.bonus ? " — COUNTER BONUS ACTION" : ""}`
+            ? `ROUND ${encounter.round || 1} · CURRENT TURN: ${turn.username}${turn.counter ? " — COUNTER BONUS TURN" : turn.bonus ? " — COUNTER BONUS ACTION" : ""}`
             : active
                 ? "Waiting for a turn..."
                 : "Waiting for encounter...";

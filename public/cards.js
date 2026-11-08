@@ -250,10 +250,10 @@ const CARD_DEFS = {
             "again for 4 turns (5 if the Shield lasted 3). Only one Shield at a time. " +
             "Costs 2.5 Energy per position. Requires 2-3 positions. No pattern needed.",
         summary: (n, cost) =>
-            `Assigned: ${n} positions. Shields a player for ${n} monster turns and costs ${cost} Energy.`,
-        effect: (n, cost) => `Shield ${n} turns · costs ${cost}`,
+            `Assigned: ${n} positions. Shields a player for ${n} rounds (from next round) and costs ${cost} Energy.`,
+        effect: (n, cost) => `Shield ${n} rounds · costs ${cost}`,
         play: card =>
-            `Pick a player: for ${card.targetCount} monster turns the monster cannot target them. ` +
+            `Pick a player: for ${card.targetCount} rounds (counting from next round) the monsters cannot target them. ` +
             `Then they suffer Shield Break (${card.targetCount === 3 ? 5 : 4} turns) and can't be ` +
             "Shielded again. Only one Shield can be active at a time.",
         aim: card =>
@@ -262,11 +262,11 @@ const CARD_DEFS = {
         hasTarget: () => getShieldCandidates().some(entry => entry.allowed),
 
         messages: r => ({
-            own: `You shielded ${r.targetUsername} for ${r.turns} monster turn(s).`,
+            own: `You shielded ${r.targetUsername} for ${r.turns} round(s), starting next round.`,
             other: r.targetPlayerID === currentPlayerID
-                ? `${r.username} shielded you! The monster can't target you for ${r.turns} turn(s).`
-                : `${r.username} shielded ${r.targetUsername} for ${r.turns} turn(s).`,
-            host: `${r.username} shielded ${r.targetUsername}: the monster cannot target them for ${r.turns} turn(s).`
+                ? `${r.username} shielded you! The monsters can't target you for ${r.turns} round(s).`
+                : `${r.username} shielded ${r.targetUsername} for ${r.turns} round(s).`,
+            host: `${r.username} shielded ${r.targetUsername}: the monsters cannot target them for ${r.turns} round(s).`
         })
     },
 
@@ -621,20 +621,20 @@ const CARD_DEFS = {
         resolvedEvent: "player-hex-resolved",
 
         description:
-            "For a number of monster turns equal to this card's positions, EVERY player's Attack, Blast, Spellvamp and Curse cards " +
+            "For a number of rounds (counting from the next round) equal to this card's positions, EVERY player's Attack, Blast, Spellvamp and Curse cards " +
             "cost 2 less Energy (never below 0.5). Re-casting it doesn't stack, it only refreshes. Costs 1.5 Energy " +
             "per position. Requires 2-6 positions. No pattern needed.",
         summary: (n, cost) =>
-            `Assigned: ${n} positions. Attack, Blast, Spellvamp and Curse cost 2 less for ${n} monster turns. Costs ${cost} Energy.`,
-        effect: (n, cost) => `Hex ${n} turns · costs ${cost}`,
+            `Assigned: ${n} positions. Attack, Blast, Spellvamp and Curse cost 2 less for ${n} rounds. Costs ${cost} Energy.`,
+        effect: (n, cost) => `Hex ${n} rounds · costs ${cost}`,
         play: card =>
-            `For ${card.targetCount} monster turns, every player's Attack and Blast cards cost 1 less Energy ` +
+            `For ${card.targetCount} rounds, every player's Attack, Blast, Spellvamp and Curse cards cost 2 less Energy (never below 0.5) ` +
             "(never below 0.5). No grid needed.",
 
         messages: r => ({
-            own: `Hex cast! Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} monster turn(s).`,
-            other: `${r.username} cast Hex: Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} turn(s).`,
-            host: `${r.username} cast Hex: Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} turn(s).`
+            own: `Hex cast! Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s), starting next round.`,
+            other: `${r.username} cast Hex: Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s).`,
+            host: `${r.username} cast Hex: Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s).`
         })
     },
 
@@ -1170,7 +1170,7 @@ function registerCardEvents(socket) {
     socket.on("shield-expired", result => {
         const text =
             `The Shield on ${result.targetUsername} has expired. ` +
-            `Shield Break for ${result.breakTurns} turn(s).`;
+            `Shield Break for ${result.breakTurns} round(s).`;
 
         if (currentRole === "player") {
             combatCardMessage.textContent = text;

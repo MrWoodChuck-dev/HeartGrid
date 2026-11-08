@@ -1274,7 +1274,7 @@ function refreshCombatStatusLine() {
     if (!status || !currentEncounter) return;
 
     let text = currentEncounter.active
-        ? "COMBAT IN PROGRESS"
+        ? `COMBAT IN PROGRESS · ROUND ${currentEncounter.round || 1}`
         : "Encounter waiting to start.";
 
     if (currentEncounter.active && currentEncounter.taunt) {
@@ -1310,7 +1310,7 @@ function refreshCombatStatusLine() {
     }
 
     if (currentEncounter.active && currentEncounter.hex) {
-        text += ` · HEX: Attack, Blast, Spellvamp and Curse cost 2 less for ${currentEncounter.hex.remaining} monster turn(s)`;
+        text += ` · HEX: Attack, Blast, Spellvamp and Curse cost 2 less for ${currentEncounter.hex.remaining} round(s)`;
     }
 
     if (currentRole === "player" && myCounterTurns > 0) {

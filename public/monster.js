@@ -1108,7 +1108,7 @@ function buildCreator() {
 
     stage.append(card, dragHint, addButton);
 
-    attachCardDrag(card);
+    attachMonsterCardDrag(card);
 
     /* 5. The Bench */
     const bench = mcEl("div", "mc-bench");
@@ -1285,7 +1285,7 @@ socket.on("encounter-error", message => {
 /* ---------- Dragging the card onto the Bench ---------- */
 
 // Pointer-based, so it works with a mouse, a pen and a finger.
-function attachCardDrag(card) {
+function attachMonsterCardDrag(card) {
     card.style.touchAction = "none";
 
     card.addEventListener("pointerdown", event => {

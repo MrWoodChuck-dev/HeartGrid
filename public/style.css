@@ -1,10 +1,18 @@
 
+/*
+    THEME. Dark is the default. The light look is still here: it is what
+    html[data-theme="light"] gives (the toggle in the corner, theme.js).
+    Colors that were hard-coded in the light design are re-colored in the
+    DARK THEME block at the very end of this file.
+*/
 :root {
-    --background: #dad7d7;
-    --surface: #f0eeee;
-    --ink: #252525;
-    --muted: #777;
-    --border: #aaa;
+    color-scheme: dark;
+
+    --background: #101114;
+    --surface: #1c1e23;
+    --ink: #ecebe6;
+    --muted: #9a9ca3;
+    --border: #41444c;
 
     --green: #43a66b;
     --green-light: #7addc4;
@@ -13,6 +21,16 @@
     --red-light: #ff7777;
 
     --blue: #3986d6;
+}
+
+html[data-theme="light"] {
+    color-scheme: light;
+
+    --background: #dad7d7;
+    --surface: #f0eeee;
+    --ink: #252525;
+    --muted: #777;
+    --border: #aaa;
 }
 
 * {
@@ -3858,7 +3876,7 @@ body.stage-open {
     display: grid;
     justify-items: center;
     gap: 6px;
-    flex: 0 0 132px;
+    flex: 0 0 112px;
     padding: 12px 8px 10px;
     border: 3px solid rgba(128, 128, 128, 0.35);
     border-radius: 14px;
@@ -3878,7 +3896,7 @@ body.stage-open {
     box-shadow: 0 0 0 3px var(--species-color), 0 8px 18px rgba(0, 0, 0, 0.25);
 }
 
-.mc-species-art img { display: block; width: 92px; height: 92px; object-fit: contain; filter: drop-shadow(0 5px 4px rgba(0, 0, 0, 0.3)); }
+.mc-species-art img { display: block; width: 76px; height: 76px; object-fit: contain; filter: drop-shadow(0 5px 4px rgba(0, 0, 0, 0.3)); }
 .mc-species-name { font-size: 14px; font-weight: 800; letter-spacing: 1px; }
 
 /* Hover: the fixed dice loadout */
@@ -4237,3 +4255,112 @@ body.stage-open {
 
 /* Turn order: a defeated participant */
 .combat-order-item.is-dead { opacity: 0.5; text-decoration: line-through; }
+
+
+/* =====================================
+   DARK THEME  (the default; html[data-theme="light"] turns it off)
+===================================== */
+
+html:not([data-theme="light"]) body {
+    background: var(--background);
+}
+
+/* The logos are black on transparent: flip them, keeping the red. */
+html:not([data-theme="light"]) .onyro-logo,
+html:not([data-theme="light"]) .game-logo {
+    filter: invert(1) hue-rotate(180deg);
+}
+
+/* Buttons that were solid dark gray */
+html:not([data-theme="light"]) .primary-button,
+html:not([data-theme="light"]) .role-button,
+html:not([data-theme="light"]) .back-button,
+html:not([data-theme="light"]) .player-tab,
+html:not([data-theme="light"]) .discard-card-button {
+    background: #2a2d34;
+    border-color: #4a4e57;
+    color: var(--ink);
+}
+
+html:not([data-theme="light"]) .primary-button:hover:not(:disabled),
+html:not([data-theme="light"]) .role-button:hover,
+html:not([data-theme="light"]) .back-button:hover,
+html:not([data-theme="light"]) .player-tab:hover,
+html:not([data-theme="light"]) .discard-card-button:hover {
+    background: #3b3f48;
+    color: #fff;
+}
+
+html:not([data-theme="light"]) .player-tab.active,
+html:not([data-theme="light"]) .player-tab[aria-selected="true"] {
+    background: #ecebe6;
+    color: #16171a;
+}
+
+/* Panels and inputs */
+html:not([data-theme="light"]) input,
+html:not([data-theme="light"]) select,
+html:not([data-theme="light"]) textarea {
+    background: #14161a;
+    border-color: var(--border);
+    color: var(--ink);
+}
+
+html:not([data-theme="light"]) input::placeholder { color: #6f727a; }
+
+html:not([data-theme="light"]) .turn-system { background: #17191d; }
+html:not([data-theme="light"]) .initiative-player { background: var(--surface); }
+html:not([data-theme="light"]) .energy-display { background: #15171b; }
+html:not([data-theme="light"]) .energy-track { background: #34373e; }
+html:not([data-theme="light"]) .party-member { background: rgba(255, 255, 255, 0.05); }
+html:not([data-theme="light"]) .drag-ghost { background: var(--surface); color: var(--ink); }
+html:not([data-theme="light"]) .hb-dice { background: rgba(255, 255, 255, 0.05); }
+
+html:not([data-theme="light"]) .bf-scene,
+html:not([data-theme="light"]) .hb-scene {
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.25));
+}
+
+/* Enlarged card on hover */
+html:not([data-theme="light"]) .zoom-card {
+    background: #1d1f24;
+    color: var(--ink);
+}
+
+html:not([data-theme="light"]) .zoom-card-cost,
+html:not([data-theme="light"]) .zoom-card-desc { color: #dcdad3; }
+
+html:not([data-theme="light"]) .zoom-card-art {
+    background: color-mix(in srgb, var(--card-color, #666) 20%, #14161a);
+}
+
+/* The Monster creator card */
+html:not([data-theme="light"]) .mc-card {
+    background: linear-gradient(180deg, #25282e, #1a1c21);
+    color: var(--ink);
+}
+
+html:not([data-theme="light"]) .mc-species-pop { background: #0b0c0e; }
+
+/* Grid cells that were gray on light */
+html:not([data-theme="light"]) .grid-cell.empty { background: #1a1c20; border-color: #2c2f35; }
+
+/* Toggle button (theme.js) */
+.theme-toggle {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    z-index: 9000;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    cursor: pointer;
+    opacity: 0.85;
+}
+
+.theme-toggle:hover { opacity: 1; }
