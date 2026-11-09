@@ -38,7 +38,7 @@ const RAGE_ENERGY_PER_POSITION = 2;
 // Hex takes this much off Attack / Blast / Spellvamp / Curse (never below the minimum).
 const HEX_DISCOUNT = 2;
 const HEX_MIN_COST = 0.5;
-const HEX_AFFECTED_CARDS = ["attack", "blast", "spellvamp", "curse"];
+const HEX_AFFECTED_CARDS = ["attack", "heal", "blast", "spellvamp", "curse"];
 
 // Destroying an Armor cell with a direct attack costs the attacker this much.
 const ARMOR_ENERGY_PENALTY = 0.5;
@@ -245,9 +245,9 @@ const CARD_DEFS = {
         resolvedEvent: "player-shield-resolved",
 
         description:
-            "Make one player (you can pick yourself) untargetable by the monster for a number of monster " +
-            "turns equal to this card's positions. Afterwards they get Shield Break and can't be Shielded " +
-            "again for 4 turns (5 if the Shield lasted 3). Only one Shield at a time. " +
+            "Make one player (you can pick yourself) untargetable by the monsters for a number of rounds " +
+            "(counting from the next round) equal to this card's positions. Afterwards they get Shield Break and " +
+            "can't be Shielded again for 4 rounds (5 if the Shield lasted 3). Only one Shield at a time. " +
             "Costs 2.5 Energy per position. Requires 2-3 positions. No pattern needed.",
         summary: (n, cost) =>
             `Assigned: ${n} positions. Shields a player for ${n} rounds (from next round) and costs ${cost} Energy.`,
@@ -621,20 +621,20 @@ const CARD_DEFS = {
         resolvedEvent: "player-hex-resolved",
 
         description:
-            "For a number of rounds (counting from the next round) equal to this card's positions, EVERY player's Attack, Blast, Spellvamp and Curse cards " +
+            "For a number of rounds (counting from the next round) equal to this card's positions, EVERY player's Attack, Heal, Blast, Spellvamp and Curse cards " +
             "cost 2 less Energy (never below 0.5). Re-casting it doesn't stack, it only refreshes. Costs 1.5 Energy " +
             "per position. Requires 2-6 positions. No pattern needed.",
         summary: (n, cost) =>
-            `Assigned: ${n} positions. Attack, Blast, Spellvamp and Curse cost 2 less for ${n} rounds. Costs ${cost} Energy.`,
+            `Assigned: ${n} positions. Attack, Heal, Blast, Spellvamp and Curse cost 2 less for ${n} rounds. Costs ${cost} Energy.`,
         effect: (n, cost) => `Hex ${n} rounds · costs ${cost}`,
         play: card =>
-            `For ${card.targetCount} rounds, every player's Attack, Blast, Spellvamp and Curse cards cost 2 less Energy (never below 0.5) ` +
+            `For ${card.targetCount} rounds, every player's Attack, Heal, Blast, Spellvamp and Curse cards cost 2 less Energy (never below 0.5) ` +
             "(never below 0.5). No grid needed.",
 
         messages: r => ({
-            own: `Hex cast! Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s), starting next round.`,
-            other: `${r.username} cast Hex: Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s).`,
-            host: `${r.username} cast Hex: Attack, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s).`
+            own: `Hex cast! Attack, Heal, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s), starting next round.`,
+            other: `${r.username} cast Hex: Attack, Heal, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s).`,
+            host: `${r.username} cast Hex: Attack, Heal, Blast, Spellvamp and Curse cost 2 less for ${r.turns} round(s).`
         })
     },
 
@@ -1180,7 +1180,7 @@ function registerCardEvents(socket) {
     });
 
     socket.on("hex-expired", () => {
-        const text = "Hex has worn off. Attack, Blast, Spellvamp and Curse cost full Energy again.";
+        const text = "Hex has worn off. Attack, Heal, Blast, Spellvamp and Curse cost full Energy again.";
 
         if (currentRole === "player") {
             combatCardMessage.textContent = text;

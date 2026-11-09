@@ -636,6 +636,12 @@ socket.on("room-joined", data => {
     playerLobbyInfo.hidden = false;
     playerGameArea.hidden = false;
 
+    // The player screen becomes the full-screen game (see pg-* in style.css).
+    document.body.classList.add("pg-in-game");
+
+    const roomLabel = document.getElementById("pg-room-id");
+    if (roomLabel) roomLabel.textContent = data.roomID;
+
     playerIdentity.textContent =
         `${data.player.username} · ${data.player.className}`;
 
@@ -1310,7 +1316,7 @@ function refreshCombatStatusLine() {
     }
 
     if (currentEncounter.active && currentEncounter.hex) {
-        text += ` · HEX: Attack, Blast, Spellvamp and Curse cost 2 less for ${currentEncounter.hex.remaining} round(s)`;
+        text += ` · HEX: Attack, Heal, Blast, Spellvamp and Curse cost 2 less for ${currentEncounter.hex.remaining} round(s)`;
     }
 
     if (currentRole === "player" && myCounterTurns > 0) {
@@ -2100,34 +2106,6 @@ const combatStatus = document.getElementById("combat-status");
 function ensureCombatOrderUI() {
     if (!combatStatus) return null;
 
-    const battlePanel = document.getElementById("player-turn-system");
-    if (battlePanel && !battlePanel.dataset.battleLayoutReady) {
-        battlePanel.dataset.battleLayoutReady = "true";
-        const statusSection = combatStatus.closest(".player-section");
-        const statusHeading = statusSection?.querySelector("h2");
-        if (statusHeading) statusHeading.remove();
-        if (statusSection) {
-            const battleHeader = battlePanel.querySelector(".turn-system-header");
-            if (battleHeader) battleHeader.insertAdjacentElement("afterend", combatStatus);
-            else battlePanel.prepend(combatStatus);
-            statusSection.remove();
-        }
-        const cardsSection = combatCardsContainer?.closest(".player-section");
-        if (cardsSection) battlePanel.appendChild(cardsSection);
-        const title = battlePanel.querySelector(".turn-system-header h2");
-        if (title) title.textContent = "BATTLE STATUS";
-        const label = battlePanel.querySelector(".turn-round-label");
-        if (label) label.textContent = "TURN ORDER";
-        const energyDescription = battlePanel.querySelector(".energy-description");
-        if (energyDescription) energyDescription.textContent = "Energy costs are shown beside each card; some cards cost 1.5 per position.";
-        const oldInitiative = document.getElementById("player-initiative-list");
-        if (oldInitiative) oldInitiative.hidden = true;
-        const cardsHeading = cardsSection?.querySelector("h2");
-        if (cardsHeading) cardsHeading.textContent = "COMBAT CARDS";
-        const cardsDescription = cardsSection?.querySelector(".section-description");
-        if (cardsDescription) cardsDescription.textContent = "Drag a card into the Active Area to play it. Once you let go, it is locked in.";
-    }
-
     let panel = document.getElementById("combat-order-panel");
     if (panel) return panel;
 
@@ -2407,6 +2385,8 @@ socket.on("room-closed", () => {
     playerLobbyInfo.hidden = true;
     playerGameArea.hidden = true;
 
+    document.body.classList.remove("pg-in-game");
+
     playerRoomStatus.textContent =
         "The Host has closed the room.";
 
@@ -2632,30 +2612,20 @@ let playDrag = null;          // current drag session
 let playLocked = false;       // true once a card has been dropped in
 let renderAfterDrag = false;  // a card re-render was skipped mid-drag
 
+// The Active Area IS the battlefield: drag a card onto it to play the card.
 function ensureActiveArea() {
     if (activeAreaElement?.isConnected) return activeAreaElement;
 
-    const area = document.createElement("div");
-    area.id = "active-area";
-    area.className = "active-area";
+    activeAreaElement = document.getElementById("battlefield");
 
-    const label = document.createElement("span");
-    label.className = "active-area-label";
-    label.textContent = "ACTIVE AREA";
-
-    const hint = document.createElement("span");
-    hint.className = "active-area-hint";
-
-    area.append(label, hint);
-    combatCardsContainer.parentElement.insertBefore(area, combatCardsContainer);
-
-    activeAreaElement = area;
-    return area;
+    return activeAreaElement;
 }
 
 function updateActiveAreaState() {
     const area = ensureActiveArea();
-    const hint = area.querySelector(".active-area-hint");
+    const hint = document.getElementById("pg-active-hint");
+
+    if (!area) return;
 
     let text;
     let state;
@@ -2671,12 +2641,13 @@ function updateActiveAreaState() {
         text = "Wait for your turn to play a card.";
     } else {
         state = "ready";
-        text = "Drag a card here to play it. Once you let go, it is locked in.";
+        text = "Drag a card onto the battlefield to play it.";
     }
 
     area.classList.toggle("is-disabled", state === "disabled");
     area.classList.toggle("is-locked", state === "locked");
-    hint.textContent = text;
+
+    if (hint) hint.textContent = text;
 }
 
 function flashActiveArea() {
@@ -2938,7 +2909,7 @@ function onCardDragEnd(event) {
     if (!started) {
         if (event.pointerType !== "touch" && !cancelled) {
             combatCardMessage.textContent =
-                "Drag this card into the Active Area to play it.";
+                "Drag this card onto the battlefield to play it.";
         }
 
         return;
@@ -2948,7 +2919,7 @@ function onCardDragEnd(event) {
         tryPlayCard(card);
     } else {
         combatCardMessage.textContent =
-            "Drop the card inside the Active Area to play it.";
+            "Drop the card on the battlefield to play it.";
     }
 }
 
@@ -3033,16 +3004,36 @@ function renderCombatCards() {
             `${card.name}. ${getCardPlayDescription(card)} Press Enter to play it.`
         );
 
-        const face = createCompactCardFace(card);
+        // Just the icon, the name you saved it as, and its Energy cost.
+        const face = document.createElement("div");
+        face.className = "combat-card-face";
+
+        const icon = document.createElement("img");
+        icon.className = "combat-card-icon";
+        icon.src = `/assets/${card.type}.png`;
+        icon.alt = "";
+        icon.draggable = false;
+        icon.onerror = () => {
+            icon.replaceWith(Object.assign(document.createElement("span"), {
+                className: "compact-card-icon-fallback",
+                textContent: (card.type || "card").toUpperCase()
+            }));
+        };
+        face.appendChild(icon);
+
         const title = document.createElement("strong");
         title.className = "combat-card-name";
         title.textContent = card.name;
 
-        button.append(face, title);
+        const cost = document.createElement("span");
+        cost.className = "combat-card-cost";
+        cost.appendChild(createCardCostLabel(card));
+
+        button.append(face, title, cost);
 
         attachCardZoom(face, card, {
             host: button,
-            hint: "Drag into the Active Area to play"
+            hint: "Drag onto the battlefield to play"
         });
         attachCardDrag(button, card, face);
 

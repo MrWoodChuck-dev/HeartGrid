@@ -4364,3 +4364,934 @@ html:not([data-theme="light"]) .grid-cell.empty { background: #1a1c20; border-co
 }
 
 .theme-toggle:hover { opacity: 1; }
+
+
+/* =====================================
+   PLAYER SCREEN: FULL-SCREEN LAYOUT  (pg-*)
+===================================== */
+
+/*
+    Once a player has joined (body.pg-in-game) the page is one screen, no
+    scrolling:
+
+        [                                   ROOM ABC123 ]
+        [              BATTLEFIELD                       ]   <- also the Active Area
+        [ energy bar + number            (END TURN)      ]   <- every tab
+        [ what the tab shows        ]  [ tab ][ tab ]
+        [ (bottom left)             ]  [ tab ][ tab ]       <- 4 squares
+*/
+
+body.pg-in-game { overflow: hidden; }
+
+body.pg-in-game #game-content {
+    padding: 0;
+    overflow: hidden;
+}
+
+body.pg-in-game #player-screen.active {
+    display: block;
+    height: 100%;
+    padding: 0;
+}
+
+body.pg-in-game #player-screen .interface-container {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    margin: 0;
+}
+
+/* No "Player Interface / Player Panel" heading and no lobby text in the game. */
+body.pg-in-game #player-screen .interface-header,
+body.pg-in-game #player-screen #player-lobby-info,
+body.pg-in-game #player-screen #player-registration { display: none; }
+
+.pg-root {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    gap: 8px;
+    height: 100dvh;
+    padding: 8px 14px 12px;
+}
+
+.pg-root[hidden] { display: none; }
+
+/* ----- top right: the room number ----- */
+
+.pg-topbar {
+    display: flex;
+    justify-content: flex-end;
+    min-height: 22px;
+}
+
+.pg-room {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    opacity: 0.8;
+}
+
+.pg-room strong { margin-left: 6px; font-size: 14px; letter-spacing: 3px; }
+
+/* ----- centre: the battlefield ----- */
+
+.pg-battlefield {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pg-battlefield .bf-scene {
+    flex: 1;
+    min-height: 0;
+    padding: 10px 14px;
+    border-radius: 0;
+}
+
+.pg-battlefield .bf-monster-side { gap: 6px; }
+
+.pg-battlefield .bf-token { --token-size: clamp(44px, min(9vw, 11dvh), 104px); }
+
+.pg-battlefield .bf-monster-side .bf-token {
+    --token-size: clamp(48px, min(13vw, 14dvh), 132px);
+}
+
+.pg-battlefield .bf-name { font-size: 10px; }
+
+/* the Active Area states, on the battlefield itself */
+.pg-battlefield.drag-ready {
+    border-color: var(--green);
+    box-shadow: 0 0 0 2px rgba(67, 166, 107, 0.35);
+}
+
+.pg-battlefield.drag-over {
+    border-color: var(--green);
+    box-shadow: 0 0 0 4px rgba(67, 166, 107, 0.7), inset 0 0 40px rgba(67, 166, 107, 0.18);
+}
+
+.pg-battlefield.is-locked { border-color: #d39a24; }
+
+.pg-battlefield.is-blocked { animation: mc-shake 0.35s linear; border-color: var(--red); }
+
+.pg-active-hint {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    z-index: 2;
+    max-width: 90%;
+    margin: 0;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #f2efe6;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-align: center;
+    pointer-events: none;
+    transform: translateX(-50%);
+}
+
+.pg-battlefield.is-disabled .pg-active-hint { opacity: 0.6; }
+
+/* turn order + effects float across the top */
+.pg-hud {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    z-index: 3;
+    display: grid;
+    gap: 5px;
+    justify-items: center;
+    width: min(70%, 760px);
+    pointer-events: none;
+    transform: translateX(-50%);
+}
+
+.pg-hud > * { pointer-events: auto; }
+
+.pg-hud .turn-current {
+    margin: 0;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #f2efe6;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+.pg-status {
+    margin: 0;
+    max-width: 100%;
+    color: var(--muted);
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-align: center;
+}
+
+.pg-hud #combat-order-panel {
+    margin: 0;
+    padding: 5px 7px;
+    max-width: 100%;
+    background: rgba(0, 0, 0, 0.45);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.pg-hud #combat-order-panel .combat-order-heading { display: none; }
+
+.pg-hud #combat-order-panel .combat-order-list {
+    flex-wrap: nowrap;
+    gap: 5px;
+    overflow-x: auto;
+}
+
+.pg-hud #combat-order-panel .combat-order-item {
+    flex: 0 0 auto;
+    min-width: 0;
+    gap: 7px;
+    padding: 4px 9px 4px 5px;
+}
+
+.pg-hud #combat-order-panel .combat-order-number { flex-basis: 22px; width: 22px; height: 22px; font-size: 11px; }
+.pg-hud #combat-order-panel .combat-order-name { font-size: 11px; }
+.pg-hud #combat-order-panel .combat-order-class { display: none; }
+.pg-hud #combat-order-panel .combat-order-count { font-size: 9px; }
+
+.pg-hud .monster-effects-panel {
+    margin: 0;
+    padding: 4px 8px;
+    background: rgba(0, 0, 0, 0.45);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.pg-hud .monster-effects-heading { display: none; }
+.pg-hud .monster-effects-list { min-height: 0; gap: 6px; }
+.pg-hud .monster-effects-panel .monster-effect { padding: 2px 8px 2px 4px; }
+.pg-hud .monster-effects-panel .monster-effect img { width: 24px; height: 24px; }
+.pg-hud .monster-effects-panel .monster-effect-count { font-size: 14px; }
+.pg-hud .monster-effects-empty { font-size: 9px; }
+
+/* ----- under the battlefield: Energy, every tab ----- */
+
+.pg-energy-row {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    min-height: 0;
+}
+
+.pg-energy-row .energy-display[hidden] { display: none; }
+
+.pg-energy-row .pg-energy {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 14px;
+    margin: 0;
+    padding: 6px 14px;
+    border-radius: 10px;
+}
+
+.pg-energy .energy-heading { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; margin: 0; }
+.pg-energy .energy-heading > span { font-size: 10px; letter-spacing: 1.5px; }
+.pg-energy .energy-bar-row { flex: 1; margin: 0; }
+.pg-energy .energy-description { display: none; }
+
+.pg-energy-row #end-player-turn { margin: 0; padding: 0 22px; white-space: nowrap; }
+.pg-energy-row #end-player-turn[hidden] { display: none; }
+
+/* ----- bottom: tab content (left), four tab squares (right) ----- */
+
+.pg-bottom {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    height: clamp(190px, 29dvh, 300px);
+}
+
+.pg-panel {
+    min-width: 0;
+    min-height: 0;
+    padding: 10px 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+.pg-panel .player-tab-content { height: 100%; }
+.pg-panel .player-tab-content.active { display: flex; flex-direction: column; }
+
+.pg-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 8px;
+    height: 100%;
+    aspect-ratio: 1;
+}
+
+.pg-tabs .player-tab {
+    display: grid;
+    place-items: center;
+    padding: 6px;
+    border-radius: 12px;
+    font-size: clamp(8px, 1.4dvh, 11px);
+    font-weight: 800;
+    line-height: 1.3;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+.pg-tabs .player-tab[data-tab^="soon"] { opacity: 0.5; }
+
+.pg-soon {
+    margin: auto;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 4px;
+    opacity: 0.45;
+}
+
+/* ----- PREPARATION ----- */
+
+.pg-prep {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.pg-prep-empty {
+    margin: auto;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    opacity: 0.55;
+}
+
+.pg-prep-title { margin: 0; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; }
+.pg-prep-sub { margin: 0; font-size: 11px; opacity: 0.7; }
+.pg-prep-notice { min-height: 14px; margin: 0; color: #d39a24; font-size: 11px; }
+
+.pg-options { display: grid; gap: 8px; }
+
+.pg-option {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 6px 12px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.pg-option.is-picked { border-color: var(--green); background: rgba(67, 166, 107, 0.07); }
+.pg-option.is-invalid { opacity: 0.4; }
+
+/* the card icon, first on the left */
+.pg-card-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: clamp(64px, 10dvh, 92px);
+    height: clamp(64px, 10dvh, 92px);
+    padding: 6px;
+    overflow: hidden;
+    border: 2px solid var(--card-color, #666);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    transition: transform 0.12s ease;
+}
+
+.pg-card-icon:hover { transform: translateY(-2px); }
+.pg-card-icon img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.pg-card-icon-fallback { font-size: 10px; font-weight: 800; color: var(--ink); }
+
+/* click the picked icon again: the confirm bar across its middle */
+.pg-confirm-bar {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    padding: 7px 0;
+    background: var(--green);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    text-align: center;
+    cursor: pointer;
+    transform: translateY(-50%);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+    animation: pg-confirm-in 0.14s ease;
+}
+
+.pg-confirm-bar:hover { background: #4fbf7e; }
+
+@keyframes pg-confirm-in {
+    from { opacity: 0; transform: translateY(-50%) scaleX(0.6); }
+    to { opacity: 1; transform: translateY(-50%) scaleX(1); }
+}
+
+/* description, Energy cost, min - max positions */
+.pg-option-info { display: grid; gap: 3px; min-width: 0; }
+.pg-option-head { display: flex; align-items: baseline; gap: 8px; }
+.pg-option-name { font-size: 13px; }
+
+.pg-option-desc {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.35;
+    opacity: 0.8;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+}
+
+.pg-option.is-picked .pg-option-desc { display: block; }
+
+.pg-option-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+
+.pg-meta-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
+.pg-meta-item small { font-size: 8px; font-weight: 800; letter-spacing: 1.2px; opacity: 0.6; }
+
+/* pattern + name, under the picked card */
+.pg-editor {
+    display: flex;
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border);
+}
+
+.pg-pattern { display: grid; grid-template-columns: repeat(3, 26px); gap: 4px; }
+
+.pg-pattern-cell {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: rgba(130, 130, 130, 0.2);
+    cursor: pointer;
+}
+
+.pg-pattern-cell.selected { border-color: var(--red-light, #ef7777); background: var(--red, #d94848); }
+.pg-pattern-count { margin: 0; font-size: 11px; font-weight: 800; }
+
+.pg-name { flex: 1; min-width: 120px; max-width: 260px; padding: 6px 10px; font-size: 12px; }
+
+/* hand full: discard list */
+.pg-discard-list { display: grid; gap: 6px; }
+
+.pg-discard-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.pg-discard-icon img { display: block; width: 34px; height: 34px; object-fit: contain; }
+
+.pg-discard-button {
+    padding: 5px 10px;
+    border: 1px solid var(--red);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--red-light, #ef7777);
+    font-size: 10px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+/* ----- COMBAT: your cards, 2 x 2 ----- */
+
+.pg-combat-hint {
+    margin: 0 0 6px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    opacity: 0.65;
+    text-align: center;
+}
+
+#player-screen .pg-panel #combat-cards {
+    display: block;
+    flex: 1;
+    min-height: 0;
+}
+
+#player-screen .pg-panel #combat-cards .combat-card-numbered-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 8px;
+    height: 100%;
+}
+
+#player-screen .pg-panel #combat-cards .combat-card-list-item { min-height: 0; }
+
+#player-screen .pg-panel #combat-cards .combat-card-button {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 10px;
+    height: 100%;
+    min-height: 0;
+    padding: 6px 10px;
+    text-align: left;
+}
+
+#player-screen .pg-panel #combat-cards .compact-card-face {
+    flex: 0 0 auto;
+    width: auto;
+    height: 100%;
+    aspect-ratio: 1;
+    max-height: 120px;
+}
+
+#player-screen .pg-panel #combat-cards .compact-card-icon { width: 60%; height: 60%; }
+#player-screen .pg-panel #combat-cards .combat-card-name { font-size: 12px; }
+#player-screen .pg-panel #combat-cards .empty-message { margin: 20px 0; text-align: center; }
+
+#player-screen .pg-panel #combat-card-message {
+    min-height: 14px;
+    margin: 4px 0 0;
+    font-size: 11px;
+    text-align: center;
+}
+
+@media (max-width: 700px) {
+    .pg-root { padding: 6px 8px 8px; gap: 6px; }
+    .pg-bottom { height: clamp(170px, 33dvh, 260px); gap: 8px; }
+    .pg-hud { width: 94%; }
+    .pg-option { grid-template-columns: auto minmax(0, 1fr); }
+}
+
+
+/* fixes found on the first pass */
+.pg-panel .player-tab-content:not(.active),
+.pg-panel #combat-tab:not(.active) { display: none; }
+
+body.pg-in-game .theme-toggle { top: 8px; bottom: auto; left: 14px; padding: 5px 10px; font-size: 10px; }
+
+/* the pattern + name sit beside the picked card, not under it */
+.pg-option.is-picked { grid-template-columns: auto minmax(0, 1fr) auto; }
+
+.pg-editor {
+    display: grid;
+    grid-column: auto;
+    grid-template-columns: auto auto;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 0 0 0 10px;
+    border-top: 0;
+    border-left: 1px dashed var(--border);
+}
+
+.pg-pattern { grid-template-columns: repeat(3, 22px); gap: 3px; }
+.pg-pattern-cell { width: 22px; height: 22px; }
+.pg-name { grid-column: 1 / -1; max-width: 190px; min-width: 0; }
+
+.pg-card-icon { width: clamp(58px, 9dvh, 84px); height: clamp(58px, 9dvh, 84px); }
+.pg-option { padding: 6px 8px; }
+
+/* Combat tab: the 2 x 2 fills the panel */
+#player-screen .pg-panel #combat-cards { display: flex; flex-direction: column; }
+#player-screen .pg-panel #combat-cards .combat-card-numbered-list { flex: 1; height: auto; min-height: 0; }
+#player-screen .pg-panel #combat-cards .compact-card-face { max-height: none; }
+#player-screen .pg-panel #combat-cards .combat-card-name { font-size: 13px; }
+
+/* small card faces in the 2 x 2 */
+.pg-bottom { height: clamp(190px, 32dvh, 320px); }
+#player-screen .pg-panel #combat-cards .compact-card-energy { top: auto; bottom: 3px; right: 4px; max-width: none; font-size: 9px; }
+#player-screen .pg-panel #combat-cards .compact-card-pattern { top: 4px; left: 4px; width: 24px; height: 24px; gap: 1px; font-size: 11px; }
+#player-screen .pg-panel #combat-cards .compact-card-pattern.count-only { width: 20px; height: 20px; }
+.pg-combat-hint { margin-bottom: 4px; }
+
+
+/* =====================================
+   PREPARATION: ARROW PICKER + FULL-SCREEN MAKER  (big, easy to read)
+===================================== */
+
+.pg-prep { align-items: center; text-align: center; }
+
+.pg-prep-title { font-size: 15px; letter-spacing: 2px; }
+.pg-prep-empty { font-size: 24px; }
+.pg-prep-sub { font-size: 14px; }
+.pg-prep-notice { min-height: 18px; font-size: 14px; font-weight: 700; }
+
+.pg-picker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(14px, 4vw, 48px);
+}
+
+.pg-arrow {
+    width: clamp(48px, 7dvh, 68px);
+    height: clamp(48px, 7dvh, 68px);
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink);
+    font-size: 24px;
+    cursor: pointer;
+}
+
+.pg-arrow:hover,
+.pg-arrow:focus-visible { border-color: var(--green); background: rgba(67, 166, 107, 0.15); outline: none; }
+
+.pg-pick {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+
+.pg-pick .compact-card-face {
+    width: clamp(86px, 15dvh, 140px);
+    height: clamp(86px, 15dvh, 140px);
+    border-width: 2px;
+    transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.pg-pick:hover .compact-card-face,
+.pg-pick:focus-visible .compact-card-face { transform: scale(1.05); border-color: var(--green); }
+
+.pg-pick .compact-card-icon { width: 62%; height: 62%; }
+.pg-pick .compact-card-energy { font-size: 12px; }
+.pg-pick.is-invalid { opacity: 0.4; }
+
+.pg-pick-caption { display: flex; align-items: baseline; justify-content: center; gap: 14px; }
+.pg-pick-name { font-size: 20px; }
+.pg-pick-count { font-size: 14px; opacity: 0.7; }
+.pg-pick-hint { margin: 0; font-size: 14px; opacity: 0.8; }
+
+.pg-discard-row { font-size: 14px; }
+.pg-discard-button { font-size: 12px; padding: 7px 12px; }
+
+/* The full-screen maker reuses .play-overlay (same screen as aiming a card) */
+
+.pg-maker { gap: 18px; }
+
+.pg-maker .play-overlay-title { font-size: 34px; }
+.pg-maker .play-overlay-kicker { font-size: 14px; }
+.pg-maker .pg-maker-instruction { font-size: 20px; line-height: 1.4; }
+
+.pg-maker-body {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(20px, 5vw, 70px);
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+.pg-maker-body.pg-guide-body { align-items: flex-start; }
+
+.pg-grid-wrap { display: grid; justify-items: center; gap: 10px; flex: 0 0 auto; }
+
+.pg-big-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    width: min(46dvh, 420px);
+    padding: 14px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.pg-big-cell {
+    position: relative;
+    aspect-ratio: 1;
+    border: 3px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.pg-big-cell:hover { filter: brightness(1.2); }
+.pg-big-cell.target-preview { animation: none; }
+
+/* the center cell is marked so it is easy to find */
+.pg-big-cell.is-center { border-color: #f2c94c; }
+
+.pg-center-tag {
+    position: absolute;
+    bottom: 5px;
+    left: 0;
+    right: 0;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    text-shadow: 0 1px 3px #000;
+    pointer-events: none;
+}
+
+.pg-grid-count { margin: 0; font-size: 26px; font-weight: 900; letter-spacing: 2px; }
+
+/* the large warning next to the grid */
+.pg-warning {
+    display: flex;
+    flex: 1 1 340px;
+    align-items: center;
+    gap: 18px;
+    max-width: 560px;
+    padding: 22px 26px;
+    border: 4px solid #f2c94c;
+    border-radius: 16px;
+    background: rgba(242, 201, 76, 0.12);
+}
+
+.pg-warning-mark {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: #f2c94c;
+    color: #1b1b1b;
+    font-size: 44px;
+    font-weight: 900;
+}
+
+.pg-warning-text {
+    margin: 0;
+    color: #fff3c4;
+    font-size: clamp(24px, 3.2vw, 38px);
+    font-weight: 900;
+    line-height: 1.25;
+}
+
+.pg-maker-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+.pg-maker-label { font-size: 14px; font-weight: 800; letter-spacing: 1.5px; }
+.pg-maker-name { flex: 1 1 200px; max-width: 360px; padding: 12px 14px; font-size: 20px; }
+.pg-maker-status { flex: 1; min-width: 120px; font-size: 18px; font-weight: 800; color: #f2c94c; }
+.pg-maker-footer .primary-button { padding: 14px 26px; font-size: 18px; }
+.pg-maker-confirm { background: var(--green); border-color: var(--green); color: #fff; }
+.pg-maker-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---- the guide: frame by frame ---- */
+
+.pg-guide { display: grid; gap: 20px; width: 100%; }
+
+.pg-guide-summary { margin: 0; font-size: 28px; font-weight: 800; line-height: 1.3; text-align: center; }
+
+.pg-frames {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    justify-content: center;
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.pg-frame {
+    position: relative;
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    flex: 1 1 230px;
+    max-width: 320px;
+    padding: 18px 16px 16px;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.pg-frame-number {
+    position: absolute;
+    top: -14px;
+    left: 14px;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: #f2c94c;
+    color: #1b1b1b;
+    font-size: 16px;
+    font-weight: 900;
+}
+
+.pg-frame-title { margin: 0; font-size: 20px; line-height: 1.25; }
+.pg-frame-caption { margin: 0; font-size: 17px; line-height: 1.4; opacity: 0.92; }
+
+.pg-frame-arrow { display: grid; align-items: center; font-size: 34px; color: #f2c94c; }
+
+.pg-frame-visual {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 130px;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.pg-frame-icon { width: 80px; height: 80px; object-fit: contain; }
+.pg-frame-note { font-size: 20px; }
+.pg-frame-line { display: block; width: 100%; font-size: 24px; text-align: center; }
+
+.pg-mini { display: grid; justify-items: center; gap: 6px; }
+.pg-mini-label { font-size: 13px; font-weight: 800; letter-spacing: 1.5px; opacity: 0.85; }
+
+.pg-mini-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 114px; }
+.pg-mini-grid .grid-cell { display: block; aspect-ratio: 1; border-radius: 4px; }
+.pg-mini-grid .grid-cell.is-hit { outline: 3px solid #ff5a5a; outline-offset: 1px; z-index: 1; }
+
+.pg-reach { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+
+.pg-reach-box {
+    flex: 1 1 280px;
+    max-width: 440px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 19px;
+}
+
+.pg-reach-box h4 { margin: 0 0 6px; font-size: 18px; letter-spacing: 2px; }
+.pg-reach-box p { margin: 3px 0; }
+.pg-reach-box.is-can { border: 3px solid var(--green); background: rgba(67, 166, 107, 0.12); }
+.pg-reach-box.is-cannot { border: 3px solid #e0524e; background: rgba(224, 82, 78, 0.12); }
+
+.pg-guide-cost { margin: 0; font-size: 20px; font-weight: 800; text-align: center; }
+
+/* Hex: the price table */
+.pg-hex-table { display: grid; gap: 6px; width: 100%; }
+
+.pg-hex-row {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    font-size: 17px;
+}
+
+.pg-hex-row.is-affected { background: rgba(67, 166, 107, 0.16); }
+.pg-hex-row img { width: 30px; height: 30px; object-fit: contain; }
+.pg-hex-name { font-weight: 700; text-align: left; }
+.pg-hex-price { display: inline-flex; align-items: baseline; gap: 8px; }
+.pg-hex-old { opacity: 0.6; }
+.pg-hex-new { color: #6be39a; font-size: 22px; }
+.pg-hex-same { font-size: 20px; }
+.pg-hex-note { min-width: 62px; font-size: 14px; font-weight: 800; opacity: 0.85; text-align: right; }
+
+/* Hex's price table needs room */
+.pg-frame:has(.pg-hex-table) { flex-basis: 440px; max-width: 540px; }
+
+/* ----- COMBAT: square tiles, 2 x 2, icon + saved name + Energy cost ----- */
+
+#player-screen .pg-panel #combat-cards .combat-card-numbered-list {
+    flex: 0 1 auto;
+    height: 100%;
+    aspect-ratio: 1;
+    margin: 0 auto;
+    gap: 8px;
+}
+
+#player-screen .pg-panel #combat-cards .combat-card-button {
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    height: 100%;
+    padding: 6px;
+    text-align: center;
+}
+
+#player-screen .pg-panel #combat-cards .combat-card-face {
+    display: grid;
+    flex: 1 1 0;
+    place-items: center;
+    width: 100%;
+    min-height: 0;
+}
+
+#player-screen .pg-panel #combat-cards .combat-card-icon {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+}
+
+#player-screen .pg-panel #combat-cards .combat-card-name {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 15px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#player-screen .pg-panel #combat-cards .combat-card-cost { font-size: 15px; font-weight: 800; }
+.pg-combat-hint { font-size: 12px; }
+
+/* readability pass: bigger bottom row (the combat tiles need the room) */
+.pg-bottom { height: clamp(250px, 40dvh, 400px); }
+
+#player-screen .pg-panel #combat-cards .combat-card-face { flex: 1 1 48px; min-height: 48px; }
+#player-screen .pg-panel #combat-cards .combat-card-button { overflow: hidden; }
+
+html:not([data-theme="light"]) .pg-maker-confirm:not(:disabled),
+.pg-maker .pg-maker-confirm:not(:disabled) {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+}
+
+html:not([data-theme="light"]) .pg-maker-confirm:not(:disabled):hover { background: #4fbf7e; }
+
+/* combat tiles: the icon is boxed into its own area so it never covers the text */
+#player-screen .pg-panel #combat-cards .combat-card-face { position: relative; display: block; }
+
+#player-screen .pg-panel #combat-cards .combat-card-icon {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: auto;
+    object-fit: contain;
+}
+
+#player-screen .pg-panel #combat-card-message { min-height: 0; margin: 2px 0 0; }
+#player-screen .pg-panel #combat-card-message:empty { display: none; }
+.pg-combat-hint { margin-bottom: 6px; }

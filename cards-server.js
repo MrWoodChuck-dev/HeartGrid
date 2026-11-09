@@ -36,7 +36,7 @@ const ARMOR_ENERGY_PENALTY = 0.5;
 // Hex: flat discount on Attack / Blast / Spellvamp / Curse, which can never push a card below this.
 const HEX_DISCOUNT = 2;
 const HEX_MIN_COST = 0.5;
-const HEX_AFFECTED_CARDS = ["attack", "blast", "spellvamp", "curse"];
+const HEX_AFFECTED_CARDS = ["attack", "heal", "blast", "spellvamp", "curse"];
 
 // Rest: extra Energy per Rest turn (on top of the Tank's natural +1) and
 // how many cells it heals each Rest turn.

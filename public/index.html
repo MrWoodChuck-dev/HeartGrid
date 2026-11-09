@@ -239,234 +239,148 @@
                     <p id="player-room-status">Waiting for Host...</p>
                 </div>
 
-                <!-- PLAYER GAME AREA -->
-                <div id="player-game-area" hidden>
+                <!-- PLAYER GAME AREA: one full screen, no scrolling.
+                       top right    room number
+                       centre       the battlefield (also the Active Area)
+                       below it     your Energy, always visible
+                       bottom left  what the selected tab shows
+                       bottom right the four tabs
+                     The layout is styled at the end of style.css (pg-*). -->
+                <div id="player-game-area" class="pg-root" hidden>
 
-                    <div class="player-navigation">
-                        <button class="player-tab active" data-tab="preparation">
-                            PREPARATION
-                        </button>
-                        <button class="player-tab" data-tab="combat">
-                            COMBAT
+                    <header class="pg-topbar">
+                        <span class="pg-room">ROOM <strong id="pg-room-id">------</strong></span>
+                    </header>
+
+                    <!-- BATTLEFIELD: hover (or tap) a combatant for details.
+                         Drag a combat card onto it to play the card. -->
+                    <section id="battlefield" class="battlefield pg-battlefield" aria-label="Battlefield">
+                        <div class="bf-scene">
+                            <div class="bf-monster-side"></div>
+                            <div class="bf-formation"></div>
+                        </div>
+
+                        <!-- Turn order and the Monsters' effects float over the top of the scene -->
+                        <div id="player-turn-system" class="pg-hud">
+                            <p id="player-turn-current" class="turn-current">
+                                Waiting for encounter...
+                            </p>
+                            <p id="combat-status" class="pg-status">Waiting for an encounter...</p>
+
+                            <div id="player-initiative-list" class="initiative-list" hidden></div>
+                        </div>
+
+                        <p class="pg-active-hint" id="pg-active-hint"></p>
+                    </section>
+
+                    <!-- ENERGY: right under the battlefield, whichever tab is open -->
+                    <div class="pg-energy-row">
+                        <div id="energy-display" class="energy-display pg-energy" hidden>
+                            <div class="energy-heading">
+                                <span>ENERGY</span>
+                                <strong class="energy-readout">
+                                    <span id="energy-value-icons" class="energy-icons"></span>
+                                    <span id="energy-value">0 / 9</span>
+                                </strong>
+                            </div>
+
+                            <div class="energy-bar-row">
+                                <span id="energy-bar-icons" class="energy-icons"></span>
+                                <div class="energy-track">
+                                    <div id="energy-bar" class="energy-fill"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button id="end-player-turn" class="primary-button" hidden>
+                            END TURN
                         </button>
                     </div>
 
-                    <!-- PREPARATION -->
-                    <div id="preparation-tab" class="player-tab-content active">
+                    <div class="pg-bottom">
 
-                        <div class="player-section">
-                            <h2>CARD ASSIGNMENT</h2>
-                            <p id="player-assignment-status">
-                                Waiting for a Host assignment.
-                            </p>
-                        </div>
+                        <!-- WHAT THE TAB SHOWS (bottom left) -->
+                        <div class="pg-panel">
 
-                        <div class="player-section">
-                            <h2>CARD CREATOR</h2>
+                            <!-- PREPARATION: player-ui.js draws it into #pg-prep -->
+                            <div id="preparation-tab" class="player-tab-content active">
+                                <div id="pg-prep" class="pg-prep"></div>
+                            </div>
 
-                            <div class="card-settings">
-                                <label for="card-name">CARD NAME</label>
-                                <input
-                                    type="text"
-                                    id="card-name"
-                                    placeholder="Enter card name"
-                                    maxlength="24"
-                                    autocomplete="off"
-                                >
+                            <!-- COMBAT: your cards, 2 x 2 -->
+                            <div id="combat-tab" class="player-tab-content">
+                                <p class="pg-combat-hint">DRAG A CARD TO THE BATTLEFIELD</p>
 
-                                <div id="card-type-container" hidden>
-                                    <label for="card-type">CARD TYPE</label>
-                                    <select id="card-type">
-                                        <option value="attack">Attack</option>
-                                        <option value="heal">Heal</option>
-                                    </select>
+                                <div id="heal-target-container" hidden>
+                                    <label for="heal-target-player">HEAL TARGET</label>
+                                    <select id="heal-target-player"></select>
+                                </div>
 
-                                    <p id="card-type-description" class="card-type-description">
-                                        Attack cards target the monster.
+                                <div id="combat-cards">
+                                    <p class="empty-message">
+                                        Your saved cards will appear here.
                                     </p>
                                 </div>
+
+                                <p id="combat-card-message" class="status-message"></p>
+                            </div>
+
+                            <div id="soon-1-tab" class="player-tab-content">
+                                <p class="pg-soon">COMING SOON</p>
+                            </div>
+
+                            <div id="soon-2-tab" class="player-tab-content">
+                                <p class="pg-soon">COMING SOON</p>
+                            </div>
+                        </div>
+
+                        <!-- THE TABS (bottom right): four squares -->
+                        <nav class="pg-tabs" aria-label="Player tabs">
+                            <button class="player-tab active" data-tab="preparation">PREPARATION</button>
+                            <button class="player-tab" data-tab="combat">COMBAT</button>
+                            <button class="player-tab" data-tab="soon-1">COMING SOON</button>
+                            <button class="player-tab" data-tab="soon-2">COMING SOON</button>
+                        </nav>
+                    </div>
+
+                    <!-- Still here so the card-making and grid code keep working. The
+                         new Preparation tab (player-ui.js) draws over them and drives
+                         them; nothing in this block is shown. -->
+                    <div class="pg-legacy" aria-hidden="true" hidden>
+
+                        <div class="player-section">
+                            <p id="player-assignment-status">Waiting for a Host assignment.</p>
+
+                            <input type="text" id="card-name" maxlength="24" autocomplete="off">
+
+                            <div id="card-type-container" hidden>
+                                <select id="card-type">
+                                    <option value="attack">Attack</option>
+                                    <option value="heal">Heal</option>
+                                </select>
+                                <p id="card-type-description" class="card-type-description"></p>
                             </div>
 
                             <p id="card-selection-count">Waiting for assignment.</p>
                             <div id="card-grid" class="card-grid"></div>
 
-                            <button id="save-card-button" class="primary-button" disabled>
-                                SAVE CARD
-                            </button>
-
+                            <button id="save-card-button" class="primary-button" disabled>SAVE CARD</button>
                             <p id="card-message" class="status-message"></p>
                         </div>
 
-                        <div class="player-section">
-                            <div class="section-heading">
-                                <h2>MY CARDS</h2>
-                                <span id="card-inventory-count">0 / 4 CARDS</span>
-                            </div>
+                        <span id="card-inventory-count">0 / 4 CARDS</span>
+                        <div id="saved-cards"></div>
 
-                            <p class="section-description">
-                                You can carry a maximum of four cards.
-                                Discard a card to make room for another.
-                            </p>
-
-                            <div id="saved-cards">
-                                <p class="empty-message">No cards created yet.</p>
-                            </div>
-                        </div>
-
-                    </div>
-
-                    <!-- COMBAT -->
-                    <div id="combat-tab" class="player-tab-content">
-
-                        <!-- COMBAT STATUS -->
-                        <div class="player-section">
-                            <h2>COMBAT STATUS</h2>
-                            <p id="combat-status">Waiting for an encounter...</p>
-                        </div>
-
-                        <!-- PLAYER COMBAT ORDER -->
-                        <div class="player-section turn-system" id="player-turn-system">
-
-                            <div class="turn-system-header">
-                                <div>
-                                    <p class="interface-label">BATTLE STATUS</p>
-                                    <h2>COMBAT ORDER</h2>
-                                </div>
-                                <span class="turn-round-label">INITIATIVE</span>
-                            </div>
-
-                            <p id="player-turn-current" class="turn-current">
-                                Waiting for encounter...
-                            </p>
-
-                            <div id="player-initiative-list" class="initiative-list">
-                                <p class="empty-message">
-                                    Initiative will appear when combat starts.
-                                </p>
-                            </div>
-
-                            <!-- ENERGY -->
-                            <div id="energy-display" class="energy-display" hidden>
-                                <div class="energy-heading">
-                                    <span>YOUR ENERGY</span>
-                                    <strong class="energy-readout">
-                                        <span id="energy-value-icons" class="energy-icons"></span>
-                                        <span id="energy-value">0 / 9</span>
-                                    </strong>
-                                </div>
-
-                                <div class="energy-bar-row">
-                                    <span id="energy-bar-icons" class="energy-icons"></span>
-                                    <div class="energy-track">
-                                        <div id="energy-bar" class="energy-fill"></div>
-                                    </div>
-                                </div>
-
-                                <p class="energy-description">
-                                    Card cost equals the number of target positions.
-                                </p>
-                            </div>
-
-                            <button id="end-player-turn" class="primary-button" hidden>
-                                END TURN
-                            </button>
-
-                        </div>
-
-                        <!-- BATTLEFIELD: hover (or tap) a combatant for details -->
-                        <section id="battlefield" class="battlefield" aria-label="Battlefield">
-                            <h2 class="battlefield-title">BATTLEFIELD</h2>
-
-                            <div class="bf-scene">
-                                <div class="bf-monster-side"></div>
-                                <div class="bf-formation"></div>
-                            </div>
-
-                            <p class="bf-hint">
-                                Hover a portrait (tap on touch screens) to see the
-                                monster's grid and effects, or a player's Energy,
-                                grid and cards.
-                            </p>
-                        </section>
-
-                        <!-- COMBAT ARENA (your own grid, kept in sync but hidden:
-                             the battlefield above replaces it) -->
-                        <div class="combat-arena legacy-arena" aria-hidden="true">
-
+                        <div class="combat-arena legacy-arena">
                             <section class="combat-party-panel">
-                                <h2>YOUR PARTY</h2>
-
                                 <div class="party-member">
-                                    <h3>MY HEART GRID</h3>
-
-                                    <p class="section-description">
-                                        Green represents HP. Dark represents empty
-                                        positions. Blue represents Overheal.
-                                    </p>
-
                                     <div id="heart-grid" class="heart-grid"></div>
-
-                                    <div class="grid-legend">
-                                        <span>
-                                            <i class="legend-color hp-color"></i>
-                                            HP
-                                        </span>
-                                        <span>
-                                            <i class="legend-color empty-color"></i>
-                                            EMPTY
-                                        </span>
-                                        <span>
-                                            <i class="legend-color overheal-color"></i>
-                                            OVERHEAL
-                                        </span>
-                                        <span>
-                                            <i class="legend-color target-color"></i>
-                                            TARGET
-                                        </span>
-                                    </div>
                                 </div>
-
-                                <div class="party-roster-section">
-                                    <h3>PARTY HEART GRIDS</h3>
-                                    <p class="section-description">
-                                        View and target your teammates' grids.
-                                    </p>
-
-                                    <div id="party-grids">
-                                        <p class="empty-message">
-                                            Waiting for party members.
-                                        </p>
-                                    </div>
-                                </div>
+                                <div id="party-grids"></div>
                             </section>
-
                         </div>
-
-                        <!-- COMBAT CARDS -->
-                        <div class="player-section">
-                            <h2>COMBAT CARDS</h2>
-
-                            <p class="section-description">
-                                Hover a card to read what it does. Drag a card into
-                                the Active Area to play it. Once you let go, the
-                                action is locked in and cannot be cancelled.
-                            </p>
-
-                            <div id="heal-target-container" hidden>
-                                <label for="heal-target-player">HEAL TARGET</label>
-                                <select id="heal-target-player"></select>
-                            </div>
-
-                            <div id="combat-cards">
-                                <p class="empty-message">
-                                    Your saved cards will appear here.
-                                </p>
-                            </div>
-
-                            <p id="combat-card-message" class="status-message"></p>
-                        </div>
-
                     </div>
+
                 </div>
             </div>
         </section>
@@ -487,6 +401,10 @@
 <script src="stage.js"></script>
 <script src="battlefield.js"></script>
 <script src="host-battle.js"></script>
+
+<!-- THE PLAYER SCREEN: full-screen layout, Preparation tab -->
+<script src="card-guides.js"></script>
+<script src="player-ui.js"></script>
 
 <!-- ENERGY AND INITIATIVE INTERFACE -->
 <script>
@@ -634,9 +552,8 @@
         endPlayerTurnButton.disabled = !isMyTurn;
         endMonsterTurnButton.disabled = !isMonsterTurn;
 
-        energyDisplay.hidden = !active || currentRole !== "player";
-
-        if (!active) displayedEnergy = 0;
+        // Your Energy is always on screen (under the battlefield), whichever tab is open.
+        energyDisplay.hidden = currentRole !== "player";
 
         renderEnergyDisplay();
     }
