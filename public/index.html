@@ -1,632 +1,622 @@
-
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Heart Grid - A game by Woodchuck.">
-
-    <title>Heart Grid</title>
-
-    <link rel="stylesheet" href="style.css">
-    <script src="theme.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f0f12">
+  <title>Heart Grid</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/css/main-menu.css">
+  <link rel="stylesheet" href="/css/battlefield.css">
+  <link rel="stylesheet" href="/css/cards.css">
+  <link rel="stylesheet" href="/css/encounter.css">
 </head>
-
 <body>
 
-<main class="boot-screen">
+  <!-- SPLASH: white screen with the logo, any key or click continues -->
+  <section id="splash-screen" class="view active">
+    <img id="splash-logo" class="splash-logo" alt="Heart Grid">
+    <p class="splash-prompt">Press any key to continue</p>
+  </section>
 
-    <!-- ONYRO SPLASH -->
-    <section id="onyro-splash" class="screen active">
-        <img src="assets/onyro-logo.png" alt="ONYRO" class="onyro-logo">
-    </section>
+  <!-- MAIN MENU -->
+  <section id="home-screen" class="view">
+    <div class="home-actions">
+      <button class="menu-choice" data-go="host-screen">Host</button>
+      <button class="menu-choice" data-go="player-screen">Player</button>
+    </div>
+  </section>
 
-    <!-- TITLE SCREEN -->
-    <section id="game-title" class="screen">
-        <img src="assets/heart-grid-logo.png" alt="Heart Grid" class="game-logo">
-        <p class="press-prompt">PRESS ANY KEY TO CONTINUE</p>
-        <span class="version">A GAME BY WOODCHUCK</span>
-    </section>
+  <!-- HOST PANEL -->
+  <section id="host-screen" class="view host-view">
+    <header class="host-bar">
+      <div class="host-left">
+        <button id="host-back" class="button quiet">← Menu</button>
+        <nav class="host-tabs">
+          <button class="host-tab active" data-hostpane="manage" type="button">Management</button>
+          <button class="host-tab" data-hostpane="monsters" type="button">Monsters</button>
+          <button class="host-tab" data-hostpane="combat" type="button">Combat</button>
+        </nav>
+      </div>
+      <div class="host-room">
+        <button class="button quiet fx-toggle" type="button" title="Turn card animations on or off">Animations: On</button>
+        <div id="host-room-id" class="room-id" hidden><span>Room ID</span><strong></strong></div>
+        <button id="create-room-button" class="button primary">Create Room</button>
+      </div>
+    </header>
 
-    <!-- GAME -->
-    <section id="game-content" class="screen">
+    <!-- Management: players + assignments -->
+    <div id="host-pane-manage" class="host-pane active">
+      <nav class="manage-tabs">
+        <button class="manage-tab active" data-mpane="players" type="button">Players</button>
+        <button class="manage-tab" data-mpane="base" type="button">Shop</button>
+      </nav>
+      <div id="mpane-players" class="mpane active">
+      <div id="host-players" class="host-players"></div>
 
-        <!-- ROLE SELECTION -->
-        <section id="role-screen" class="panel-screen active">
-            <div class="role-container">
-                <h1>HEART GRID</h1>
-                <p>Select your role to continue.</p>
+      <!-- Assignments: drag a player here -->
+      <div class="assign-bar">
+        <h3 class="side-heading">Issue Assignments · drag a player onto one</h3>
+        <div id="assign-zones" class="assign-zones">
+          <div class="zone-drop" data-kind="energy"><strong>Give Energy</strong><span>Player accepts it in Preparation</span></div>
+          <div class="zone-drop" data-kind="card"><strong>Issue Card</strong><span>2 to 6 positions, player builds it</span></div>
+          <div class="zone-drop good" data-kind="revive"><strong>Revive / Reset HP</strong><span>Back to full HP, alive</span></div>
+          <div class="zone-drop bad" data-kind="kill"><strong>Kill Player</strong><span>Empties HP, player dies</span></div>
+          <div class="zone-drop" data-kind="join"><strong>Join Encounter</strong><span>Drops them onto the Battlefield</span></div>
+          <div class="zone-drop" data-kind="leave"><strong>Leave Encounter</strong><span>Removes them from the Battlefield</span></div>
+        </div>
+      </div>
+      </div>
 
-                <div class="role-buttons">
-                    <button id="host-role-button" class="role-button">HOST</button>
-                    <button id="player-role-button" class="role-button">PLAYER</button>
-                </div>
+      <!-- Shop: the Class Area, the Dropship Area (2x2) and the structures -->
+      <div id="mpane-base" class="mpane">
+        <div class="base-wrap">
+          <div class="base-col"><h3 class="side-heading">Class Area</h3><div id="base-grid" class="base-grid"></div></div>
+          <div class="base-col"><h3 class="side-heading">Dropship Area</h3><div id="base-drop" class="base-grid base-drop"></div>
+            <p class="base-hint">Pick a structure, press <kbd>R</kbd> to rotate, then click a cell here to place it. Click a placed structure to take it back. Players move structures themselves: stand next to one, Move Structure, R to rotate, click to put it down.</p></div>
+          <div class="base-col"><h3 class="side-heading">Structures</h3><div id="base-list" class="base-list"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monsters: build a monster, name it, save it to the Bench -->
+    <div id="host-pane-monsters" class="host-pane">
+      <div class="mon-builder">
+        <section class="mon-left">
+          <span class="label">Monster</span>
+          <div class="mon-picker">
+            <button id="mon-prev" class="mini-arrow big" type="button" aria-label="Previous monster">‹</button>
+            <div id="mon-card" class="mon-card">
+              <img id="mon-img" alt="">
+              <h3 id="mon-name"></h3>
+              <p id="mon-dice" class="mon-dice"></p>
+              <div id="mon-locked" class="mon-locked" hidden>Coming soon</div>
             </div>
+            <button id="mon-next" class="mini-arrow big" type="button" aria-label="Next monster">›</button>
+          </div>
         </section>
 
-        <!-- HOST SCREEN -->
-        <section id="host-screen" class="panel-screen">
-            <div class="interface-container">
-
-                <div class="interface-header">
-                    <div>
-                        <p class="interface-label">GAME MANAGEMENT</p>
-                        <h1>HOST PANEL</h1>
-                    </div>
-                    <button class="back-button">BACK</button>
-                </div>
-
-                <!-- HOST ROOM -->
-                <div class="host-section">
-                    <h2>HOST ROOM</h2>
-
-                    <button id="create-room-button" class="primary-button">
-                        CREATE ROOM
-                    </button>
-
-                    <div id="host-room-info" hidden>
-                        <p>Share this Room ID with your players:</p>
-                        <h2 id="host-room-id" class="room-code">------</h2>
-                        <p id="host-player-count">Players: 0 / 5</p>
-                    </div>
-
-                    <p id="host-room-message" class="status-message"></p>
-                </div>
-
-                <!-- PLAYER LOBBY -->
-                <div class="host-section">
-                    <h2>PLAYER LOBBY</h2>
-                    <div id="host-player-list">
-                        <p class="empty-message">Create a room to see players.</p>
-                    </div>
-                </div>
-
-                <!-- CARD ASSIGNMENT -->
-                <div class="host-section">
-                    <h2>ISSUE CARD ASSIGNMENT</h2>
-
-                    <p class="section-description">
-                        Decide when a player receives a new card assignment
-                        and how many positions their card can target.
-                    </p>
-
-                    <label for="assignment-player">PLAYER</label>
-                    <select id="assignment-player" disabled>
-                        <option value="">Waiting for players</option>
-                    </select>
-
-                    <label for="host-target-count">TARGET POSITIONS</label>
-                    <select id="host-target-count">
-                        <option value="" selected disabled>Select target count</option>
-                        <option value="2">2 Positions</option>
-                        <option value="3">3 Positions</option>
-                        <option value="4">4 Positions</option>
-                        <option value="5">5 Positions</option>
-                        <option value="6">6 Positions</option>
-                        <option value="7">7 Positions</option>
-                    </select>
-
-                    <p class="host-limit-note">
-                        Minimum: 2 positions. Maximum: 7 positions.
-                    </p>
-
-                    <button id="issue-assignment-button" class="primary-button" disabled>
-                        ISSUE ASSIGNMENT
-                    </button>
-
-                    <p id="host-message" class="status-message"></p>
-                </div>
-
-                <!-- MONSTER ENCOUNTER: the creator and the Bench are built by monster.js -->
-                <div class="host-section" id="monster-encounter-section">
-                    <h2>MONSTER ENCOUNTER</h2>
-
-                    <p class="section-description">
-                        Pick a Species, name it, choose its HP grid and drag it onto
-                        the Bench. Up to three Monsters can fight together.
-                    </p>
-
-                    <div id="monster-creator-root"></div>
-
-                    <p id="monster-encounter-message" class="status-message"></p>
-                </div>
-
-                <!-- BATTLEFIELD MANAGEMENT (combat order + party + monster attack) -->
-                <div class="host-section turn-system" id="host-turn-system">
-                    <div class="turn-system-header">
-                        <div>
-                            <p class="interface-label">BATTLE MANAGEMENT</p>
-                            <h2>BATTLEFIELD MANAGEMENT</h2>
-                        </div>
-                        <span class="turn-round-label">COMBAT ORDER</span>
-                    </div>
-
-                    <p id="host-turn-current" class="turn-current">
-                        Waiting for encounter...
-                    </p>
-
-                    <div id="host-initiative-list" class="initiative-list">
-                        <p class="empty-message">Initiative will appear when combat starts.</p>
-                    </div>
-
-                    <!-- Monster, D10 and the party, built by host-battle.js -->
-                    <div id="host-battlefield" class="hb-scene"></div>
-
-                    <p id="hb-banner" class="taunt-banner" hidden></p>
-                    <p id="hb-message" class="status-message"></p>
-
-                    <button id="end-monster-turn" class="primary-button" hidden>
-                        END MONSTER TURN
-                    </button>
-                </div>
-
-                <!-- The party grids (hidden). Monster dice and attacks live in
-                     host-battle.js and monster-server.js. -->
-                <div id="host-engine" hidden>
-                <!-- PARTY STATUS -->
-                <div class="host-section">
-                    <h2>PARTY STATUS</h2>
-                    <p class="section-description">
-                        Monitor every player's Heart Grid during combat.
-                    </p>
-
-                    <div id="host-party-grids">
-                        <p class="empty-message">Waiting for players.</p>
-                    </div>
-                </div>
-
-                </div>
-
-            </div>
+        <section class="pick-col">
+          <span class="label">HP Grid <b id="hpg-label"></b></span>
+          <div class="pick-row">
+            <button id="hpg-prev" class="mini-arrow big" type="button" aria-label="Smaller HP Grid">‹</button>
+            <div class="pick-viewport"><div id="hpg-track" class="pick-track"></div></div>
+            <button id="hpg-next" class="mini-arrow big" type="button" aria-label="Bigger HP Grid">›</button>
+          </div>
         </section>
 
-        <!-- PLAYER SCREEN -->
-        <section id="player-screen" class="panel-screen">
-            <div class="interface-container">
-
-                <div class="interface-header">
-                    <div>
-                        <p class="interface-label">PLAYER INTERFACE</p>
-                        <h1>PLAYER PANEL</h1>
-                    </div>
-                    <button class="back-button">BACK</button>
-                </div>
-
-                <!-- REGISTRATION -->
-                <div id="player-registration" class="player-section">
-                    <h2>JOIN A ROOM</h2>
-
-                    <label for="join-room-input">ROOM ID</label>
-                    <input
-                        type="text"
-                        id="join-room-input"
-                        placeholder="Enter Room ID"
-                        maxlength="6"
-                        autocomplete="off"
-                    >
-
-                    <label for="player-username">USERNAME</label>
-                    <input
-                        type="text"
-                        id="player-username"
-                        placeholder="Enter username"
-                        maxlength="16"
-                        autocomplete="off"
-                    >
-
-                    <label for="player-class">SELECT CLASS</label>
-                    <select id="player-class">
-                        <option value="" selected disabled>Choose a class</option>
-                        <option value="Tank">Tank</option>
-                        <option value="Warrior">Warrior</option>
-                        <option value="Mage">Mage</option>
-                        <option value="Support">Support</option>
-                        <option value="Thief">Thief</option>
-                    </select>
-
-                    <button id="join-room-button" class="primary-button">
-                        JOIN ROOM
-                    </button>
-
-                    <p id="player-room-message" class="status-message"></p>
-                </div>
-
-                <!-- PLAYER LOBBY -->
-                <div id="player-lobby-info" class="player-section" hidden>
-                    <h2>CONNECTED TO ROOM</h2>
-                    <p id="player-identity"></p>
-                    <p id="player-room-status">Waiting for Host...</p>
-                </div>
-
-                <!-- PLAYER GAME AREA: one full screen, no scrolling.
-                       top right    room number
-                       centre       the battlefield (also the Active Area)
-                       below it     your Energy, always visible
-                       bottom left  what the selected tab shows
-                       bottom right the four tabs
-                     The layout is styled at the end of style.css (pg-*). -->
-                <div id="player-game-area" class="pg-root" hidden>
-
-                    <header class="pg-topbar">
-                        <span class="pg-room">ROOM <strong id="pg-room-id">------</strong></span>
-                    </header>
-
-                    <!-- BATTLEFIELD: hover (or tap) a combatant for details.
-                         Drag a combat card onto it to play the card. -->
-                    <section id="battlefield" class="battlefield pg-battlefield" aria-label="Battlefield">
-                        <div class="bf-scene">
-                            <div class="bf-monster-side"></div>
-                            <div class="bf-formation"></div>
-                        </div>
-
-                        <!-- Turn order and the Monsters' effects float over the top of the scene -->
-                        <div id="player-turn-system" class="pg-hud">
-                            <p id="player-turn-current" class="turn-current">
-                                Waiting for encounter...
-                            </p>
-                            <p id="combat-status" class="pg-status">Waiting for an encounter...</p>
-
-                            <div id="player-initiative-list" class="initiative-list" hidden></div>
-                        </div>
-
-                        <p class="pg-active-hint" id="pg-active-hint"></p>
-                    </section>
-
-                    <!-- ENERGY: right under the battlefield, whichever tab is open -->
-                    <div class="pg-energy-row">
-                        <div id="energy-display" class="energy-display pg-energy" hidden>
-                            <div class="energy-heading">
-                                <span>ENERGY</span>
-                                <strong class="energy-readout">
-                                    <span id="energy-value-icons" class="energy-icons"></span>
-                                    <span id="energy-value">0 / 9</span>
-                                </strong>
-                            </div>
-
-                            <div class="energy-bar-row">
-                                <span id="energy-bar-icons" class="energy-icons"></span>
-                                <div class="energy-track">
-                                    <div id="energy-bar" class="energy-fill"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <button id="end-player-turn" class="primary-button" hidden>
-                            END TURN
-                        </button>
-                    </div>
-
-                    <div class="pg-bottom">
-
-                        <!-- WHAT THE TAB SHOWS (bottom left) -->
-                        <div class="pg-panel">
-
-                            <!-- PREPARATION: player-ui.js draws it into #pg-prep -->
-                            <div id="preparation-tab" class="player-tab-content active">
-                                <div id="pg-prep" class="pg-prep"></div>
-                            </div>
-
-                            <!-- COMBAT: your cards, 2 x 2 -->
-                            <div id="combat-tab" class="player-tab-content">
-                                <p class="pg-combat-hint">DRAG A CARD TO THE BATTLEFIELD</p>
-
-                                <div id="heal-target-container" hidden>
-                                    <label for="heal-target-player">HEAL TARGET</label>
-                                    <select id="heal-target-player"></select>
-                                </div>
-
-                                <div id="combat-cards">
-                                    <p class="empty-message">
-                                        Your saved cards will appear here.
-                                    </p>
-                                </div>
-
-                                <p id="combat-card-message" class="status-message"></p>
-                            </div>
-
-                            <div id="soon-1-tab" class="player-tab-content">
-                                <p class="pg-soon">COMING SOON</p>
-                            </div>
-
-                            <div id="soon-2-tab" class="player-tab-content">
-                                <p class="pg-soon">COMING SOON</p>
-                            </div>
-                        </div>
-
-                        <!-- THE TABS (bottom right): four squares -->
-                        <nav class="pg-tabs" aria-label="Player tabs">
-                            <button class="player-tab active" data-tab="preparation">PREPARATION</button>
-                            <button class="player-tab" data-tab="combat">COMBAT</button>
-                            <button class="player-tab" data-tab="soon-1">COMING SOON</button>
-                            <button class="player-tab" data-tab="soon-2">COMING SOON</button>
-                        </nav>
-                    </div>
-
-                    <!-- Still here so the card-making and grid code keep working. The
-                         new Preparation tab (player-ui.js) draws over them and drives
-                         them; nothing in this block is shown. -->
-                    <div class="pg-legacy" aria-hidden="true" hidden>
-
-                        <div class="player-section">
-                            <p id="player-assignment-status">Waiting for a Host assignment.</p>
-
-                            <input type="text" id="card-name" maxlength="24" autocomplete="off">
-
-                            <div id="card-type-container" hidden>
-                                <select id="card-type">
-                                    <option value="attack">Attack</option>
-                                    <option value="heal">Heal</option>
-                                </select>
-                                <p id="card-type-description" class="card-type-description"></p>
-                            </div>
-
-                            <p id="card-selection-count">Waiting for assignment.</p>
-                            <div id="card-grid" class="card-grid"></div>
-
-                            <button id="save-card-button" class="primary-button" disabled>SAVE CARD</button>
-                            <p id="card-message" class="status-message"></p>
-                        </div>
-
-                        <span id="card-inventory-count">0 / 4 CARDS</span>
-                        <div id="saved-cards"></div>
-
-                        <div class="combat-arena legacy-arena">
-                            <section class="combat-party-panel">
-                                <div class="party-member">
-                                    <div id="heart-grid" class="heart-grid"></div>
-                                </div>
-                                <div id="party-grids"></div>
-                            </section>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
+        <section class="pick-col">
+          <span class="label">Range Grid <b id="rng-label"></b></span>
+          <div class="pick-row">
+            <button id="rng-prev" class="mini-arrow big" type="button" aria-label="Smaller Range Grid">‹</button>
+            <div class="pick-viewport"><div id="rng-track" class="pick-track"></div></div>
+            <button id="rng-next" class="mini-arrow big" type="button" aria-label="Bigger Range Grid">›</button>
+          </div>
         </section>
+      </div>
 
+      <div class="mon-actions">
+        <button id="mon-save" class="button primary" type="button">Name &amp; Save to Bench</button>
+        <span class="mon-hint">The Bench is where saved monsters wait. Drag them onto the battlefield in the Combat tab.</span>
+      </div>
+      <h3 class="side-heading">Saved on the Bench</h3>
+      <div id="mon-saved" class="mon-saved"></div>
+    </div>
+
+    <!-- Combat: battlefield, turn order, Bench / Dice -->
+    <div id="host-pane-combat" class="host-pane">
+      <div class="enc-bar">
+        <div id="host-turn-strip" class="turn-strip"></div>
+        <div class="enc-buttons">
+          <button id="enc-area-ready" class="button primary" type="button" hidden>Active Area ready</button>
+          <button id="enc-start" class="button primary" type="button">Start Encounter</button>
+          <button id="enc-pause" class="button quiet" type="button">Pause</button>
+          <button id="enc-endturn" class="button quiet" type="button">End Turn</button>
+          <button id="enc-end" class="button quiet" type="button">End Encounter</button>
+        </div>
+      </div>
+      <div class="field-wrap"><div id="host-battlefield" class="battlefield square"></div></div>
+      <div class="host-bottom">
+        <div class="bt-panes">
+          <div id="bt-bench" class="bt-pane active">
+            <button id="bench-prev" class="mini-arrow big" type="button" aria-label="Previous monster">‹</button>
+            <div id="bench-slot" class="bench-slot"></div>
+            <button id="bench-next" class="mini-arrow big" type="button" aria-label="Next monster">›</button>
+            <button id="bench-remove" class="button quiet" type="button" hidden>Remove selected from battlefield</button>
+          </div>
+          <div id="bt-battle" class="bt-pane">
+            <div class="wall-editor">
+              <div class="wall-swatch" aria-hidden="true"><i class="wall-body"><b></b><b></b><b></b><b></b></i></div>
+              <div>
+                <strong>Battlefield editor · Wall <span id="wall-count"></span></strong>
+                <p>Click an empty cell of the Fog or Active Area to place a Wall (2×2 HP Grid). Click a Wall to remove it. Fog Area walls stay after every encounter; Active Area walls are removed when the encounter ends. Editing is for the Prepare Phase, the Setup Phase and Pause.</p>
+              </div>
+            </div>
+          </div>
+          <div id="bt-dice" class="bt-pane">
+            <div id="dice-who" class="dice-who"></div>
+            <div class="dice-board">
+              <button id="mdie-attack" class="mdie decagon" type="button" data-die="attack"><span class="mdie-name">Attack</span><span class="mdie-d">D10</span><b class="mdie-roll">-</b></button>
+              <button id="mdie-move" class="mdie circle" type="button" data-die="move"><span class="mdie-name">Move</span><span class="mdie-d">D2</span><b class="mdie-roll">-</b></button>
+              <div class="dice-side">
+                <button id="mdie-open-attack" class="button primary" type="button" hidden>Choose targets</button>
+                <p id="dice-hint" class="dice-hint"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <nav class="bottom-tabs">
+          <button class="bt-tab active" data-bt="bench" type="button">Bench</button>
+          <button class="bt-tab" data-bt="dice" type="button">Dice</button>
+          <button class="bt-tab" data-bt="battle" type="button">Battlefield</button>
+        </nav>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAYER MAIN MENU: Room ID on the top left, class infographic in the center -->
+  <section id="player-screen" class="view player-menu">
+    <header class="join-bar">
+      <button class="button quiet" data-go="home-screen">← Menu</button>
+      <label class="field"><span>Room ID</span><input id="room-input" maxlength="6" autocomplete="off" placeholder="Paste Room ID"></label>
+      <label class="field"><span>Name</span><input id="name-input" maxlength="16" autocomplete="off" placeholder="Your name"></label>
+      <button id="join-button" class="button primary">Join</button>
+      <p id="join-message" class="message"></p>
+    </header>
+
+    <div id="class-stage" class="class-stage" hidden>
+      <button id="class-prev" class="stage-arrow" aria-label="Previous class">‹</button>
+
+      <div class="slide-viewport">
+        <div id="class-slide" class="class-slide">
+          <div class="slide-body">
+
+            <article class="infographic">
+              <h2 id="class-name" class="ig-name"></h2>
+
+              <div class="ig-hp">
+                <span class="label">HP Grid <b id="hp-size"></b></span>
+                <div id="hp-grid" class="hp-grid"></div>
+              </div>
+
+              <div class="ig-character"><img id="character-img" alt="Class character"></div>
+
+              <div class="ig-info">
+                <p id="class-description" class="class-description"></p>
+                <div id="energy-box" class="energy-box" tabindex="0">
+                  <div class="energy-numbers">
+                    <span>Capacity <b id="energy-cap"></b></span>
+                    <span>Regen <b id="energy-regen"></b></span>
+                  </div>
+                  <div class="energy-row">
+                    <img id="energy-icon" src="/assets/classes/general/energy.png" alt="Energy">
+                    <div class="energy-track"><span></span></div>
+                  </div>
+                </div>
+
+                <div class="card-shelf">
+                  <button id="card-prev" class="mini-arrow" aria-label="Previous cards">‹</button>
+                  <div id="card-row" class="card-row"></div>
+                  <button id="card-next" class="mini-arrow" aria-label="Next cards">›</button>
+                </div>
+              </div>
+            </article>
+
+            <aside class="icon-column">
+              <img id="class-icon" class="class-icon" alt="">
+              <button id="confirm-class-button" class="button primary wide">Confirm</button>
+            </aside>
+
+          </div>
+          <div id="taken-text" class="taken-text" hidden>TAKEN</div>
+        </div>
+      </div>
+
+      <button id="class-next" class="stage-arrow" aria-label="Next class">›</button>
+    </div>
+  </section>
+
+  <!-- MOVEMENT PATTERN -->
+  <section id="movement-screen" class="view setup-view">
+    <h1 class="setup-title">Movement Pattern</h1>
+    <div class="setup-body">
+      <div class="setup-side">
+        <div class="warning">If you do not know what you are doing it is highly suggested you use the premade patterns.</div>
+        <h3 class="side-heading">Premade Patterns</h3>
+        <div id="preset-list" class="preset-list"></div>
+        <div class="counter">Selected cells <strong><b id="move-count">0</b> / 8</strong></div>
+        <button id="confirm-movement-button" class="button primary wide" disabled>Confirm</button>
+        <p id="move-message" class="message"></p>
+      </div>
+
+      <div class="board-wrap move-board">
+        <span class="dir dir-right">Right</span>
+        <span class="dir dir-front">Front</span>
+        <div id="move-grid" class="grid grid-9"></div>
+        <span class="dir dir-back">Back</span>
+        <span class="dir dir-left">Left</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- FIRST CARD -->
+  <section id="card-screen" class="view setup-view">
+    <h1 class="setup-title"><span id="card-heading">First Card</span> · <span id="card-title"></span></h1>
+    <div class="setup-body">
+      <div class="setup-side">
+        <div class="warning small">If you don't know what you are doing, always start at the center.</div>
+        <p id="card-description" class="card-description"></p>
+        <label class="field"><span>Card name</span><input id="card-name" maxlength="16" autocomplete="off"></label>
+        <div class="counter">Selected cells <strong><b id="card-count">0</b> / <b id="card-limit">2</b></strong></div>
+        <button id="confirm-card-button" class="button primary wide" disabled>Confirm</button>
+        <button id="cancel-card-button" class="button quiet wide" hidden>Cancel</button>
+        <p id="card-message" class="message"></p>
+      </div>
+
+      <div class="board-wrap">
+        <div id="card-grid" class="grid grid-3"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAYER PANEL: tabs on top; Combat = Battlefield + Energy + Cards; Character = class sheet with Preparation / Inventories -->
+  <section id="lobby-screen" class="view lobby-view">
+    <header class="tab-bar">
+      <nav class="tabs" role="tablist">
+        <button class="tab active" role="tab" data-tab="combat">Combat</button>
+        <button class="tab" role="tab" data-tab="character">Character <i id="tab-badge" class="badge" hidden></i></button>
+        <button class="tab" role="tab" data-tab="activities">Activities</button>
+      </nav>
+      <div class="tab-corner">
+        <button class="button quiet fx-toggle" type="button" title="Turn card animations on or off">Animations: On</button>
+        <div class="room-id compact"><span>Room ID</span><strong id="lobby-room-id"></strong></div>
+        <button id="leave-button" class="button quiet">Leave Server</button>
+      </div>
+    </header>
+
+    <div id="stage" class="stage" data-tab="combat">
+      <!-- Combat: the Battlefield -->
+      <div id="combat-pane" class="pane combat-pane">
+        <div class="enc-bar player-enc">
+          <div id="turn-strip" class="turn-strip"></div>
+          <button id="ready-btn" class="button primary" type="button" hidden>Ready</button>
+          <button id="end-turn" class="button primary" type="button" hidden>End Turn</button>
+        </div>
+        <div id="carry-bar" class="carry-bar" hidden>
+          <span id="carry-text"></span>
+          <button id="carry-drop" class="button primary" type="button">Drop Wall</button>
+        </div>
+        <div id="guide-banner" class="guide-banner" hidden></div>
+        <div class="combat-main">
+          <!-- Left: monsters your Class Range touches (HP Grid only) -->
+          <aside class="side-panel fog-panel">
+            <nav id="fog-tabs" class="side-tabs"></nav>
+            <div id="fog-body" class="side-body"></div>
+          </aside>
+
+          <div class="field-wrap">
+            <div id="battlefield" class="battlefield square"></div>
+            <button id="fog-enter" class="fog-edge fog-left" type="button" hidden>Enter Fog Area · cost 4 Energy</button>
+            <button id="fog-leave" class="fog-edge fog-right" type="button" hidden>Back to Active Area</button>
+          </div>
+
+          <!-- Right: you and your teammates (HP Grid, Energy, Cards) -->
+          <aside class="side-panel team-panel">
+            <nav id="team-tabs" class="side-tabs"></nav>
+            <div id="team-body" class="side-body"></div>
+          </aside>
+        </div>
+
+        <div class="hud">
+          <div class="energy-hud">
+            <div class="hud-icons"></div>
+            <div class="hud-bar">
+              <div class="hud-track"><span class="hud-fill"></span></div>
+              <b class="hud-number"></b>
+            </div>
+          </div>
+          <div class="hand" data-ctx="combat"></div>
+        </div>
+      </div>
+
+      <!-- Character -->
+      <div id="character-pane" class="pane panel-pane character-pane" data-sub="overview">
+        <nav class="subtabs">
+          <button class="subtab active" data-sub="overview">Character</button>
+          <button class="subtab" data-sub="preparation">Preparation <i id="sub-badge" class="badge" hidden></i></button>
+          <button class="subtab" data-sub="inventories">Inventories</button>
+        </nav>
+
+        <div class="sub-body">
+          <section class="sub sub-overview">
+            <h2 id="ch-class" class="ch-class"></h2>
+            <div class="ch-layout">
+              <div class="ch-left">
+                <div class="ch-hp">
+                  <span class="label">HP Grid <b id="ch-hp-size"></b></span>
+                  <div id="ch-hp-grid" class="hp-grid big"></div>
+                  <p id="ch-dead" class="ch-dead" hidden>DEAD</p>
+                </div>
+                <div class="ch-stack">
+                  <div class="energy-hud">
+                    <div class="hud-icons"></div>
+                    <div class="hud-bar">
+                      <div class="hud-track"><span class="hud-fill"></span></div>
+                      <b class="hud-number"></b>
+                    </div>
+                  </div>
+                  <div class="hand compact"></div>
+                </div>
+              </div>
+              <div class="ch-right">
+                <img id="ch-character" class="ch-character" alt="">
+                <img id="ch-icon" class="ch-icon" alt="">
+              </div>
+            </div>
+          </section>
+
+          <section class="sub sub-preparation">
+            <h2>Preparation</h2>
+            <div id="assignment-list" class="assignment-list"></div>
+          </section>
+
+          <section class="sub sub-inventories">
+            <h2>Inventories</h2>
+            <p class="panel-note">Nothing here yet.</p>
+          </section>
+        </div>
+      </div>
+
+      <!-- Activities -->
+      <div id="panel-pane" class="pane panel-pane activities-pane">
+        <nav class="subtabs">
+          <button class="act-subtab active" data-sub="training">Training</button>
+        </nav>
+
+        <div class="sub-body">
+          <section class="act-training">
+            <div class="train-layout">
+              <div class="train-main">
+                <header class="train-head">
+                  <div class="train-title">
+                    <h2>Training</h2>
+                    <div id="train-turn" class="turn-toggle" role="group" aria-label="Whose turn">
+                      <button type="button" class="turn-btn active" data-turn="player">Player's Turn</button>
+                      <button type="button" class="turn-btn" data-turn="dummy">Dummy's Turn</button>
+                    </div>
+                  </div>
+                  <p class="panel-note">Infinite Energy in here. Your real Energy, HP and cards are not touched. Player's Turn: drag a card onto the grid to try it on the Training Dummy. Dummy's Turn: roll its dice.</p>
+                </header>
+                <div class="field-wrap">
+                  <div id="train-field" class="battlefield square"></div>
+                </div>
+                <div class="hud">
+                  <div class="energy-hud" data-train="1">
+                    <div class="hud-icons"></div>
+                    <div class="hud-bar">
+                      <div class="hud-track"><span class="hud-fill"></span></div>
+                      <b class="hud-number"></b>
+                    </div>
+                  </div>
+                  <div class="hand" data-ctx="training"></div>
+                </div>
+              </div>
+
+              <aside class="train-side">
+                <div class="train-box">
+                  <span class="label">Training Dummy <b>HP Grid 5×5 · Range 5×5</b></span>
+                  <div id="train-dummy-grid" class="hp-grid big"></div>
+                  <div id="train-dice" class="dice-row">
+                    <button id="die-attack" class="die" type="button" data-die="attack"><span class="die-name">Attack</span><span class="die-d">D5</span><b class="die-roll">-</b></button>
+                    <button id="die-heal" class="die" type="button" data-die="heal"><span class="die-name">Heal</span><span class="die-d">D5</span><b class="die-roll">-</b></button>
+                  </div>
+                  <p id="train-dice-hint" class="dice-hint">Switch to Dummy's Turn to roll.</p>
+                  <div class="train-buttons">
+                    <button id="train-reset" class="button primary" type="button">Reset HP</button>
+                    <button id="train-attack-open" class="button primary" type="button" hidden>Choose cells</button>
+                  </div>
+                </div>
+                <div class="train-box">
+                  <span class="label">You <b id="train-me-label"></b></span>
+                  <div id="train-me-grid" class="hp-grid big"></div>
+                  <div class="train-buttons">
+                    <button id="train-reset-me" class="button quiet" type="button">Reset my HP</button>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Shared: Yes / No, card details, tooltip, toast -->
+  <div id="confirm-dialog" class="dialog-backdrop" hidden>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p id="confirm-text"></p>
+      <div class="dialog-actions">
+        <button id="confirm-no" class="button quiet">No</button>
+        <button id="confirm-yes" class="button primary">Yes</button>
+      </div>
     </section>
-</main>
+  </div>
 
-<!-- LOAD SOCKET.IO AND THE MAIN GAME SCRIPT -->
-<script src="/socket.io/socket.io.js"></script>
-<script src="monster-species.js"></script>
-<script src="cards.js"></script>
-<script src="script.js"></script>
+  <div id="assign-dialog" class="dialog-backdrop" hidden>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="assign-title">
+      <h2 id="assign-title"></h2>
+      <div id="assign-fields" class="assign-fields"></div>
+      <div class="dialog-actions">
+        <button id="assign-cancel" class="button quiet">Cancel</button>
+        <button id="assign-ok" class="button primary">Send</button>
+      </div>
+    </section>
+  </div>
 
-<!-- MONSTERS: creator, bench, targeting, initiative octagon -->
-<script src="monster.js"></script>
+  <div id="card-dialog" class="dialog-backdrop" hidden>
+    <section class="dialog card-dialog" role="dialog" aria-modal="true" aria-labelledby="card-dialog-title">
+      <button id="card-dialog-close" class="dialog-close" aria-label="Close">×</button>
+      <h2 id="card-dialog-title"></h2>
+      <div id="card-dialog-body"></div>
+    </section>
+  </div>
 
-<!-- ACTION STAGE (card -> explosion -> grid animation) AND BATTLEFIELD -->
-<script src="stage.js"></script>
-<script src="battlefield.js"></script>
-<script src="host-battle.js"></script>
+  <!-- Wall menu (Prepare / Setup Phase) -->
+  <div id="wall-menu" class="wall-menu" hidden>
+    <strong>Wall</strong>
+    <p id="wall-menu-note"></p>
+    <button id="wall-move" class="button primary" type="button">Move Wall</button>
+    <button id="wall-destroy" class="button quiet" type="button">Destroy Wall</button>
+  </div>
 
-<!-- THE PLAYER SCREEN: full-screen layout, Preparation tab -->
-<script src="card-guides.js"></script>
-<script src="player-ui.js"></script>
+  <!-- Structure menu (Prepare / Setup Phase) -->
+  <div id="prop-menu" class="wall-menu" hidden>
+    <strong id="prop-menu-name">Structure</strong>
+    <p id="prop-menu-note"></p>
+    <button id="prop-move" class="button primary" type="button">Move Structure</button>
+    <button id="prop-use" class="button quiet" type="button">Use</button>
+  </div>
 
-<!-- ENERGY AND INITIATIVE INTERFACE -->
-<script>
-    let displayedEnergy = 0;
+  <!-- Monster attack picker (Host in Combat, and the player controlling the Training Dummy) -->
+  <div id="attack-overlay" class="attack-overlay" hidden></div>
 
-    const initiativeElements = {
-        host: {
-            current: document.getElementById("host-turn-current"),
-            list: document.getElementById("host-initiative-list")
-        },
-        player: {
-            current: document.getElementById("player-turn-current"),
-            list: document.getElementById("player-initiative-list")
-        }
-    };
+  <!-- Initiative: everybody sees the die roll -->
+  <div id="init-overlay" class="init-overlay" hidden>
+    <div class="init-box">
+      <h2 class="init-title">Initiative</h2>
+      <div id="init-die" class="init-die"><b>?</b></div>
+      <ol id="init-list" class="init-list"></ol>
+      <p class="init-note">Highest number goes first. Click to close.</p>
+    </div>
+  </div>
 
-    const energyDisplay = document.getElementById("energy-display");
-    const energyValue = document.getElementById("energy-value");
-    const energyBar = document.getElementById("energy-bar");
+  <!-- Host: name the monster, then save it to the Bench -->
+  <div id="monster-dialog" class="dialog-backdrop" hidden>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="monster-dialog-title">
+      <h2 id="monster-dialog-title">Save to the Bench</h2>
+      <p id="monster-dialog-sub"></p>
+      <div class="assign-fields">
+        <label class="field"><span>Monster name</span><input id="monster-name-input" maxlength="16" autocomplete="off"></label>
+        <div class="edit-hp">
+          <div><span>Edit the HP Grid?</span><small id="monster-edit-sum">Plain: every cell healthy.</small></div>
+          <button id="monster-edit" type="button" class="button quiet">Edit HP Grid</button>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button id="monster-cancel" class="button quiet" type="button">Cancel</button>
+        <button id="monster-ok" class="button primary" type="button">Save to Bench</button>
+      </div>
+    </section>
+  </div>
 
-    const endPlayerTurnButton =
-        document.getElementById("end-player-turn");
+  <!-- Host: paint Armor and Over-heal onto a monster's HP Grid -->
+  <div id="hp-editor" class="dialog-backdrop hp-editor" hidden>
+    <section class="dialog editor-box" role="dialog" aria-modal="true" aria-labelledby="hp-editor-title">
+      <h2 id="hp-editor-title">Monster HP Grid</h2>
+      <p class="editor-note">Armor is not a second layer of HP. It denies damage that isn't aimed by a pattern (Poison, Execute, Curse explosions...) and punishes patterns that hit it. It disappears when its cell turns empty. Over-heal can sit on an Armored cell (Armor icon behind the Over-heal square).</p>
+      <div class="editor-tools" id="hp-tools">
+        <button type="button" class="tool active" data-tool="armor">Armor</button>
+        <button type="button" class="tool" data-tool="over">Over-heal</button>
+        <button type="button" class="tool" data-tool="clear">Clear</button>
+      </div>
+      <div id="hp-edit-grid" class="hp-grid edit-grid"></div>
+      <p id="hp-edit-sum" class="editor-sum"></p>
+      <div class="dialog-actions">
+        <button id="hp-edit-reset" class="button quiet" type="button">Reset</button>
+        <button id="hp-edit-done" class="button primary" type="button">Done</button>
+      </div>
+    </section>
+  </div>
 
-    const endMonsterTurnButton =
-        document.getElementById("end-monster-turn");
+  <!-- Host: how much Energy does everyone get when the encounter ends -->
+  <div id="end-dialog" class="dialog-backdrop" hidden>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="end-dialog-title">
+      <h2 id="end-dialog-title">End the encounter</h2>
+      <p id="end-dialog-text">How much Energy does everyone get for the next battle?</p>
+      <div class="assign-fields">
+        <label class="field"><span>Energy for every player</span><input id="end-energy" type="number" min="0" max="99" step="0.5" value="5"></label>
+      </div>
+      <div class="dialog-actions">
+        <button id="end-cancel" class="button quiet" type="button">Cancel</button>
+        <button id="end-ok" class="button primary" type="button">End Encounter</button>
+      </div>
+    </section>
+  </div>
 
-    function renderInitiativeList(element, order, currentTurn, encounter) {
-        if (!element) return;
+  <!-- Players: after the encounter -->
+  <div id="bless-dialog" class="dialog-backdrop" hidden>
+    <section class="dialog bless" role="dialog" aria-modal="true">
+      <div id="bless-main">
+        <h2>Encounter over</h2>
+        <p id="bless-text" class="bless-text"></p>
+        <div class="dialog-actions">
+          <button id="bless-open-guide" class="button quiet" type="button">Guide</button>
+          <button id="bless-continue" class="button primary" type="button">Continue</button>
+        </div>
+      </div>
+      <div id="bless-guide" hidden>
+        <h2>Between battles</h2>
+        <ol class="guide-list">
+          <li>Players can only create permanent structures inside the Class Area.</li>
+          <li>For now, nothing can be built inside the Active Area. You can only position yourself there.</li>
+          <li>Certain Battlefield Cards cannot be used inside the Active Area.</li>
+          <li>No Battlefield Card can be used inside the Class Area.</li>
+        </ol>
+        <div class="dialog-actions">
+          <button id="bless-back" class="button quiet" type="button">Back</button>
+          <button class="button primary" type="button" onclick="document.getElementById('bless-dialog').hidden = true">Continue</button>
+        </div>
+      </div>
+    </section>
+  </div>
 
-        element.innerHTML = "";
+  <!-- Card animations: everybody sees them, any key or click skips -->
+  <div id="fx" class="fx" hidden>
+    <div class="fx-box">
+      <div class="fx-card"><img class="fx-icon" alt=""><div class="fx-title"></div></div>
+      <div class="fx-stacks" hidden></div>
+      <div class="fx-panel" hidden>
+        <h3 class="fx-ptitle"></h3>
+        <div class="hp-grid fx-grid"></div>
+        <p class="fx-caption"></p>
+      </div>
+    </div>
+    <div class="fx-controls">
+      <span>Click or press any key to skip</span>
+      <button class="button quiet fx-skipall" type="button">Skip all animations</button>
+    </div>
+  </div>
 
-        if (!order || order.length === 0) {
-            const empty = document.createElement("p");
-            empty.className = "empty-message";
-            empty.textContent = "Initiative will appear when combat starts.";
-            element.appendChild(empty);
-            return;
-        }
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+  <div id="fog-fade" class="fog-fade" aria-hidden="true"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-        order.forEach(participant => {
-            const item = document.createElement("div");
-            item.className = "initiative-player";
-
-            if (!currentTurn?.counter && currentTurn?.id === participant.id) {
-                item.classList.add("active-turn");
-            }
-
-            if (participant.type === "monster" && getMonsterByID(participant.id)?.dead) {
-                item.classList.add("is-dead");
-            }
-
-            const number = document.createElement("strong");
-            number.className = "initiative-number";
-            number.textContent = participant.initiative;
-
-            const details = document.createElement("div");
-            details.className = "initiative-details";
-
-            const name = document.createElement("strong");
-            name.textContent = participant.username;
-
-            const role = document.createElement("span");
-            role.textContent = participant.type === "monster"
-                ? `${participant.className} · MONSTER`
-                : participant.className;
-
-            details.append(name, role);
-            item.append(number, details);
-            element.appendChild(item);
-
-            // Counter is a bonus turn immediately after the Monster's turn.
-            if (participant.type === "monster") {
-                (encounter?.counterPlayers || []).forEach(counter => {
-                    // Only the Warriors waiting on THIS Monster.
-                    const waiting = counter.counters?.[participant.id] || 0;
-                    const active = Boolean(
-                        counter.active &&
-                        encounter?.currentTurn?.counterMonsterID === participant.id
-                    );
-                    const count = waiting + (active ? 1 : 0);
-                    if (count <= 0) return;
-
-                    const bonus = document.createElement("div");
-                    bonus.className = "initiative-player counter-initiative";
-                    if (active) bonus.classList.add("active-turn");
-
-                    const bonusNumber = document.createElement("strong");
-                    bonusNumber.className = "initiative-number";
-                    bonusNumber.textContent = "↳";
-
-                    const bonusDetails = document.createElement("div");
-                    bonusDetails.className = "initiative-details";
-                    const bonusName = document.createElement("strong");
-                    bonusName.textContent = `${counter.username} — COUNTER BONUS`;
-                    const bonusRole = document.createElement("span");
-                    bonusRole.textContent = `${count} bonus turn(s)`;
-                    bonusDetails.append(bonusName, bonusRole);
-                    bonus.append(bonusNumber, bonusDetails);
-                    element.appendChild(bonus);
-                });
-            }
-        });
-    }
-
-    function renderTurnInterface(encounter) {
-        const active = Boolean(encounter?.active);
-        const order = encounter?.initiativeOrder || [];
-        const turn = encounter?.currentTurn || null;
-
-        renderInitiativeList(
-            initiativeElements.host.list,
-            order,
-            turn,
-            encounter
-        );
-
-        renderInitiativeList(
-            initiativeElements.player.list,
-            order,
-            turn,
-            encounter
-        );
-
-        const currentText = active && turn
-            ? `ROUND ${encounter.round || 1} · CURRENT TURN: ${turn.username}${turn.counter ? " — COUNTER BONUS TURN" : turn.bonus ? " — COUNTER BONUS ACTION" : ""}`
-            : active
-                ? "Waiting for a turn..."
-                : "Waiting for encounter...";
-
-        initiativeElements.host.current.textContent = currentText;
-        initiativeElements.player.current.textContent = currentText;
-
-        const isMyTurn =
-            currentRole === "player" &&
-            turn?.type === "player" &&
-            turn.id === currentPlayerID;
-
-        const isMonsterTurn =
-            currentRole === "host" &&
-            turn?.type === "monster";
-
-        endPlayerTurnButton.hidden = !active || !isMyTurn;
-        endMonsterTurnButton.hidden = !active || !isMonsterTurn;
-
-        endPlayerTurnButton.disabled = !isMyTurn;
-        endMonsterTurnButton.disabled = !isMonsterTurn;
-
-        // Your Energy is always on screen (under the battlefield), whichever tab is open.
-        energyDisplay.hidden = currentRole !== "player";
-
-        renderEnergyDisplay();
-    }
-
-    /* Energy readout: yellow bar + number, with the Energy icon on the left
-       of both. Past 9 Energy (overflow) the icon becomes a stack of three. */
-    function renderEnergyDisplay() {
-        const overflow = displayedEnergy > 9;
-
-        energyValue.textContent = `${displayedEnergy} / 9`;
-
-        energyBar.style.width =
-            `${Math.max(0, Math.min(100, displayedEnergy / 9 * 100))}%`;
-
-        energyDisplay.classList.toggle("is-overflow", overflow);
-
-        const negative = displayedEnergy < 0;
-
-        setEnergyIcons(document.getElementById("energy-value-icons"), overflow, negative);
-        setEnergyIcons(document.getElementById("energy-bar-icons"), overflow, negative);
-    }
-
-    /* RECEIVE ENERGY FROM SERVER */
-    socket.on("player-state", state => {
-        if (currentRole !== "player") return;
-
-        displayedEnergy = state.energy ?? 0;
-
-        renderTurnInterface(currentEncounter);
-    });
-
-    /* RECEIVE INITIATIVE FROM SERVER */
-    socket.on("encounter-state", encounter => {
-        renderTurnInterface(encounter);
-    });
-
-    /* KEEP ENERGY SYNCHRONIZED WITH PARTY STATE */
-    socket.on("party-update", players => {
-        if (currentRole !== "player") return;
-
-        const ownPlayer = (players || []).find(
-            player => player.id === currentPlayerID
-        );
-
-        if (ownPlayer) {
-            displayedEnergy = ownPlayer.energy ?? 0;
-        }
-
-        renderTurnInterface(currentEncounter);
-    });
-
-    /* PLAYER ENDS TURN */
-    endPlayerTurnButton.addEventListener("click", () => {
-        if (currentRole !== "player") return;
-
-        endPlayerTurnButton.disabled = true;
-        socket.emit("end-player-turn");
-    });
-
-    /* HOST ENDS MONSTER TURN */
-    endMonsterTurnButton.addEventListener("click", () => {
-        if (currentRole !== "host") return;
-
-        endMonsterTurnButton.disabled = true;
-        socket.emit("end-monster-turn");
-    });
-
-    /* RESET WHEN ROOM CLOSES */
-    socket.on("room-closed", () => {
-        displayedEnergy = 0;
-        renderTurnInterface(null);
-    });
-</script>
-
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/card-data.js"></script>
+  <script src="/js/structure-data.js"></script>
+  <script src="/js/fx.js"></script>
+  <script src="/js/main.js"></script>
+  <script src="/js/encounter.js"></script>
 </body>
 </html>
