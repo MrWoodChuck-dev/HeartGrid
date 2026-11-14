@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="/css/battlefield.css">
   <link rel="stylesheet" href="/css/cards.css">
   <link rel="stylesheet" href="/css/encounter.css">
+  <link rel="stylesheet" href="/css/shop.css">
+  <link rel="stylesheet" href="/css/fx-field.css">
 </head>
 <body>
 
@@ -59,6 +61,7 @@
         <h3 class="side-heading">Issue Assignments · drag a player onto one</h3>
         <div id="assign-zones" class="assign-zones">
           <div class="zone-drop" data-kind="energy"><strong>Give Energy</strong><span>Player accepts it in Preparation</span></div>
+          <div class="zone-drop" data-kind="materials"><strong>Give Materials</strong><span>Scrap, Wood, Construction Material, Gold</span></div>
           <div class="zone-drop" data-kind="card"><strong>Issue Card</strong><span>2 to 6 positions, player builds it</span></div>
           <div class="zone-drop good" data-kind="revive"><strong>Revive / Reset HP</strong><span>Back to full HP, alive</span></div>
           <div class="zone-drop bad" data-kind="kill"><strong>Kill Player</strong><span>Empties HP, player dies</span></div>
@@ -68,13 +71,15 @@
       </div>
       </div>
 
-      <!-- Shop: the Class Area, the Dropship Area (2x2) and the structures -->
+      <!-- Shop: the Host fills a 4x2 grid with materials, structures and cards (js/shop-ui.js) -->
       <div id="mpane-base" class="mpane">
-        <div class="base-wrap">
-          <div class="base-col"><h3 class="side-heading">Class Area</h3><div id="base-grid" class="base-grid"></div></div>
-          <div class="base-col"><h3 class="side-heading">Dropship Area</h3><div id="base-drop" class="base-grid base-drop"></div>
-            <p class="base-hint">Pick a structure, press <kbd>R</kbd> to rotate, then click a cell here to place it. Click a placed structure to take it back. Players move structures themselves: stand next to one, Move Structure, R to rotate, click to put it down.</p></div>
-          <div class="base-col"><h3 class="side-heading">Structures</h3><div id="base-list" class="base-list"></div></div>
+        <div class="shop-host">
+          <header class="shop-head">
+            <img class="shop-head-icon" src="/assets/shop.png" alt="Shop" onerror="this.onerror=null;this.src='/assets/missing.png'">
+            <h1 class="shop-title">Shop</h1>
+          </header>
+          <div id="shop-grid" class="shop-grid"></div>
+          <p class="shop-hint">Press <b>+</b> to put something on sale. Hover an item to see it bigger with its cost, click it to edit or discard it.</p>
         </div>
       </div>
     </div>
@@ -315,7 +320,10 @@
           </aside>
 
           <div class="field-wrap">
-            <div id="battlefield" class="battlefield square"></div>
+            <div id="cam-view" class="cam-view">
+              <div id="battlefield" class="battlefield square"></div>
+              <i class="cam-arrow up"></i><i class="cam-arrow down"></i><i class="cam-arrow left"></i><i class="cam-arrow right"></i>
+            </div>
             <button id="fog-enter" class="fog-edge fog-left" type="button" hidden>Enter Fog Area · cost 4 Energy</button>
             <button id="fog-leave" class="fog-edge fog-right" type="button" hidden>Back to Active Area</button>
           </div>
@@ -382,7 +390,7 @@
 
           <section class="sub sub-inventories">
             <h2>Inventories</h2>
-            <p class="panel-note">Nothing here yet.</p>
+            <div id="inv-view" class="inv-view"></div>
           </section>
         </div>
       </div>
@@ -481,6 +489,53 @@
       <div id="card-dialog-body"></div>
     </section>
   </div>
+
+  <!-- Player: the Shop screen (opened with Use on the Shop) -->
+  <div id="shop-overlay" class="shop-overlay" hidden>
+    <header class="so-bar">
+      <button id="so-back" class="button quiet" type="button">← Back</button>
+      <div class="so-title"><img class="shop-head-icon sm" src="/assets/material/shop.png" alt="" onerror="this.onerror=null;this.src='/assets/missing.png'"><h1>Shop</h1></div>
+      <nav class="so-tabs">
+        <button class="so-tab active" data-sotab="shop" type="button">Shop</button>
+        <button class="so-tab" data-sotab="inventory" type="button">Inventory</button>
+      </nav>
+      <div id="so-mats" class="so-mats"></div>
+    </header>
+    <div id="so-pane-shop" class="so-pane active">
+      <div id="so-grid" class="shop-grid"></div>
+      <p id="so-empty" class="shop-empty" hidden>Nothing is for sale yet.</p>
+    </div>
+    <div id="so-pane-inventory" class="so-pane">
+      <div id="so-inv" class="inv-view"></div>
+    </div>
+  </div>
+
+  <!-- Host: add / edit a Shop item -->
+  <div id="shop-dialog" class="dialog-backdrop" hidden>
+    <section class="dialog shop-dialog" role="dialog" aria-modal="true" aria-labelledby="sd-title">
+      <h2 id="sd-title">Add to the Shop</h2>
+      <div id="sd-body" class="assign-fields"></div>
+      <div class="dialog-actions">
+        <button id="sd-cancel" class="button quiet" type="button">Cancel</button>
+        <button id="sd-ok" class="button primary" type="button">Put on sale</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- Host: a saved Shop item (Edit / Discard) -->
+  <div id="shop-pick" class="dialog-backdrop" hidden>
+    <section class="dialog shop-pick" role="dialog" aria-modal="true">
+      <div id="sp-body" class="sp-body"></div>
+      <div class="dialog-actions">
+        <button id="sp-close" class="button quiet" type="button">Close</button>
+        <button id="sp-discard" class="button quiet danger" type="button">Discard</button>
+        <button id="sp-edit" class="button primary" type="button">Edit</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- Big preview while hovering a Shop / Inventory item -->
+  <div id="shop-hover" class="shop-hover" hidden></div>
 
   <!-- Wall menu (Prepare / Setup Phase) -->
   <div id="wall-menu" class="wall-menu" hidden>
@@ -615,8 +670,11 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/card-data.js"></script>
   <script src="/js/structure-data.js"></script>
+  <script src="/js/shop-data.js"></script>
   <script src="/js/fx.js"></script>
+  <script src="/js/fx-field.js"></script>
   <script src="/js/main.js"></script>
   <script src="/js/encounter.js"></script>
+  <script src="/js/shop-ui.js"></script>
 </body>
 </html>

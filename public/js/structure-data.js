@@ -9,32 +9,32 @@
   "use strict";
 
   // shape = where the pieces start when the Host places the structure (offsets; every 90 degree turn maps (x, y) -> (-y, x)).
-  // pieces[i] = { name, icon }: icon is the picture of that piece in public/assets/structure/ (a missing file shows the "missing asset" picture).
-  // use: "generate" = makes a Wall, "soon" = Coming Soon. auto = every room starts with one (the Host can't add or remove it).
+  // pieces[i] = { name, icon }: icon is the picture of that piece in public/assets/material/ (a missing file shows the "missing asset" picture).
+  // use: "generate" = makes a Wall, "shop" = opens the Shop, "quests" = opens Assignments, "soon" = Coming Soon. auto = every room starts with one (the Host can't add or remove it).
   const STRUCTURES = {
     shop: {
-      name: "Shop", auto: true, use: "soon", shape: [[0, 0], [1, 0], [0, 1], [1, 1]],
-      pieces: [1, 2, 3, 4].map(n => ({ name: `Piece ${n}`, icon: `shop_${n}.png` })),
-      note: "Works while all 4 pieces are connected."
+      name: "Shop", auto: true, use: "shop", shape: [[0, 0], [1, 0], [0, 1], [1, 1]],
+      pieces: [1, 2, 3, 4].map(n => ({ name: `Piece ${n}`, icon: "shop.png" })),
+      note: "Works while all 4 pieces are connected. Press Use to open it."
     },
     wall_gen: {
       name: "Wall Generator", use: "generate", shape: [[0, 0], [1, 0]],
-      pieces: [{ name: "Generator", icon: "wall_generator_1.png" }, { name: "Output", icon: "wall_generator_2.png" }],
+      pieces: [{ name: "Generator", icon: "wall_generator.png" }, { name: "Output", icon: "wall_output.png" }],
       note: "Works while both pieces are connected. Makes 1 free Wall per encounter on its Output piece, unless a Wall is still there."
     },
     crafting: {
       name: "Crafting Table", use: "soon", shape: [[0, 0], [1, 0], [0, 1]],
-      pieces: [1, 2, 3].map(n => ({ name: `Piece ${n}`, icon: `crafting_table_${n}.png` })),
+      pieces: [1, 2, 3].map(n => ({ name: `Piece ${n}`, icon: "crafting_table.png" })),
       note: "Works while all 3 pieces are connected. Coming Soon."
     },
     quest: {
-      name: "Quest Board", use: "soon", shape: [[0, 0], [1, 0]],
-      pieces: [1, 2].map(n => ({ name: `Piece ${n}`, icon: `quest_board_${n}.png` })),
-      note: "Works while both pieces are connected. Coming Soon."
+      name: "Quest Board", use: "quests", shape: [[0, 0], [1, 0]],
+      pieces: [1, 2].map(n => ({ name: `Piece ${n}`, icon: "quest_board.png" })),
+      note: "Works while both pieces are connected. Press Use to open your Assignments, where Host quests are accepted and tracked."
     }
   };
 
-  const ASSET_DIR = "/assets/structure/";
+  const ASSET_DIR = "/assets/structure/"; 
   const WALL_ICON = "wall.png";
   const iconUrl = file => ASSET_DIR + file;
   const REACH = 2;                                    // a carried piece can be put down up to this many cells from its carrier

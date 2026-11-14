@@ -78,7 +78,7 @@
 .hp-grid span { aspect-ratio: 1; border-radius: 3px; background: var(--green); }
 
 .ig-character { grid-area: char; display: flex; align-items: center; justify-content: center; min-height: 0; }
-.ig-character img { width: 100%; max-height: 100%; object-fit: contain; image-rendering: pixelated; }
+.ig-character img { width: 100%; max-height: 100%; object-fit: contain; }
 
 .ig-info { grid-area: info; align-self: end; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
 

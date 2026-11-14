@@ -126,6 +126,14 @@ const costFor = (arena, actor, type, positions) =>
 
 const PRESENCE_RANGE = 1;          // a Monster's Range becomes a 3x3 while Presence is up
 const PRESENCE_CLASS_RANGE = 3;    // the Tank's Class Range becomes 7x7
+// Weaken: every charge on a Monster lowers its next Attack roll by 1 (never below 0), and is spent doing it. Charges it doesn't need stay.
+// Returns { roll, cut }.
+function weakenRoll(mon, roll) {
+  const cut = Math.min(mon.weaken || 0, roll);
+  if (cut > 0) mon.weaken -= cut;
+  return { roll: roll - cut, cut };
+}
+
 const presenceTank = arena => arena.players.find(p => p.className === "Tank" && HG.alivePlayer(p) && p.turns && p.turns.presence > 0) || null;
 const monsterRange = (arena, m) => presenceTank(arena) ? PRESENCE_RANGE : (m.range ?? 99);
 
@@ -609,6 +617,12 @@ function use(arena, actor, cardIndex, req = {}) {
       fx.bf = { kind: "hold", id: mon.id, x: mon.x, y: mon.y, w: mon.w || 1, h: mon.h || 1, amount: def.fixedTurns, targetId: mon.id };
       break;
     }
+    case "weaken": {                                   // Weaken: charges on a Monster. Its next Attack rolls are lowered (see weakenRoll)
+      const mon = chosen[0].e;
+      mon.weaken = (mon.weaken || 0) + positions;
+      fx.bf = { kind: "weaken", from: { x: actor.x, y: actor.y }, to: { x: mon.x, y: mon.y, w: mon.w || 1, h: mon.h || 1 }, amount: positions, targetId: mon.id };
+      break;
+    }
     case "guard":
     case "retaliate":
     case "curse": {
@@ -673,5 +687,5 @@ function hostView(fx) {
 
 module.exports = {
   HG, initPlayer, tickRound, isShielded, softCells, armoredCells, makeMonster, resetGrid, newMarks, copyMarks, snap, nonEmpty, setRng,
-  hexed, costFor, use, monsterStrike, presenceTank, monsterRange, visible, smokeHidden, PRESENCE_CLASS_RANGE, monsterHeal, hostView, hit, damage
+  hexed, costFor, use, monsterStrike, weakenRoll, presenceTank, monsterRange, visible, smokeHidden, PRESENCE_CLASS_RANGE, monsterHeal, hostView, hit, damage
 };

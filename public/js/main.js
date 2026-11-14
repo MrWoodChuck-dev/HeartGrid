@@ -17,6 +17,7 @@
 
   const HGC = window.HGCards, HGS = window.HGStructures;
   const HGFx = window.HGFx;
+  const HGFxField = window.HGFxField;
 
   const CLASSES = ["Tank", "Warrior", "Support", "Mage", "Rogue"];
   const CLASS_INFO = {
@@ -270,6 +271,17 @@
         if (!Number.isInteger(amount) || amount < 1 || amount > 99) { toast("Energy must be a whole number from 1 to 99."); return false; }
         send({ amount });
       });
+    } else if (kind === "materials") {
+      const HS = window.HGShop;
+      const mat = document.createElement("select");
+      HS.MAT_KEYS.forEach(k => mat.add(new Option(HS.MATERIALS[k].name, k)));
+      const input = document.createElement("input");
+      input.type = "number"; input.min = 1; input.max = HS.MAX_COST; input.value = 5;
+      assignDialog(`Give Materials to ${p.username}`, [field("Material", mat), field(`Amount (1-${HS.MAX_COST})`, input)], () => {
+        const amount = Number(input.value);
+        if (!Number.isInteger(amount) || amount < 1 || amount > HS.MAX_COST) { toast(`Amount must be a whole number from 1 to ${HS.MAX_COST}.`); return false; }
+        send({ mat: mat.value, amount });
+      });
     } else if (kind === "card") {
       const type = document.createElement("select");
       CLASS_INFO[p.className].cards.forEach(t => type.add(new Option(CARDS[t].name, t)));
@@ -447,8 +459,8 @@
   }
 
   const DN = 5;                                    // sample grid size in the dialog
-  const dMarks = () => ({ guard: Array(DN * DN).fill(null), ret: Array(DN * DN).fill(0), curse: Array(DN * DN).fill(0) });
-  const dSnap = (cells, marks) => ({ cells: [...cells], marks: { guard: [...marks.guard], ret: [...marks.ret], curse: [...marks.curse] } });
+  const dMarks = () => ({ guard: Array(DN * DN).fill(null), ret: Array(DN * DN).fill(0), curse: Array(DN * DN).fill(0), armor: Array(DN * DN).fill(0) });
+  const dSnap = (cells, marks) => ({ cells: [...cells], marks: { guard: [...marks.guard], ret: [...marks.ret], curse: [...marks.curse], armor: [...(marks.armor || [])] } });
   const dNeighbors = i => {
     const x = i % DN, y = Math.floor(i / DN), out = [];
     if (y > 0) out.push(i - DN);
@@ -535,9 +547,53 @@
         st.target = { kind: "player", id: "you", name: "Your", n: DN };
         return { steps: [st], charge: { from: 0, to: pattern.length }, caption: "Every cell your Attack damages spends 1 charge and heals one empty cell. Never Over-heal.", player: true };
       }
-      case "taunt": return { steps: [], charge: { from: 0, to: pattern.length }, caption: "A Monster that can reach you must target you. Each damage it deals to you uses up 1 charge." };
+      case "taunt": case "counter": {                              // charge / turn based: a sample battlefield instead of an HP Grid
+        const st = HGFxField.stage(type);
+        return { field7: st, caption: st.caption, charge: { from: 0, to: pattern.length, unit: type === "counter" ? "rounds" : "charges" } };
+      }
+      case "spellvamp": {
+        const before = [...full], after = [...full], bm = dMarks(), am = dMarks(), ch = [];
+        const [a, b = a] = cells;
+        bm.armor[a] = 1;                                            // one Armored cell...
+        ch.push({ idx: a, mark: "armor", on: false });
+        before[b] = 2; after[b] = 1;                                // ...and one Over-heal cell (the same cell if the pattern has one position)
+        ch.push({ idx: b, from: 2, to: 1, wave: 0 });
+        const gain = 2;
+        return { steps: [mk("spellvamp", before, bm, after, am, ch, { caption: `Spellvamp 0 > ${gain}` })], charge: { from: 0, to: gain }, caption: "The cells shake wildly in purple, then pop away with their Armor and Over-heal. Each layer taken gives you 1 charge for Blast." };
+      }
+      case "penetrate": {
+        const armored = [6, 8, 16, 18], bm = dMarks(), am = dMarks(), ch = [];
+        armored.forEach(i => { bm.armor[i] = 1; am.armor[i] = 1; });
+        [6, 18].forEach(i => { am.armor[i] = 0; ch.push({ idx: i, mark: "armor", on: false }); });
+        return { steps: [mk("penetrate", full, bm, full, am, ch, { caption: "Penetrate 2 > 0" })], charge: { from: 0, to: pattern.length }, caption: "After your Attack, every charge left sends a lance through the Armor of a random Armored cell, however far away it is." };
+      }
       case "hex": return { field: "hex", caption: "Everyone in the 3x3 around the Mage pays 2 less Energy per card (min 0.5). The Mage too, except for Hex cards." };
       case "buff": return { field: "buff", caption: "The teammate gains 1.5 Energy per position. You pay 1 per position." };
+      case "weaken": return { field: "weaken", caption: "A pink spark lands on the Monster: it gets Weaken charges. Its next Attack rolls are lowered by 1 per charge." };
+      case "shield": return { field: "shield", caption: "A blue spark lands on your teammate: for the rounds of the Shield Monsters can't target them. When it ends they can't be shielded again for 3 rounds longer." };
+      // Battlefield cards: a 7x7 sample grid (js/fx-field.js)
+      case "trail": case "smoke": case "clone": case "force": case "gravity": case "hold": case "move": case "presence": {
+        const st = HGFxField.stage(type);
+        return st ? { field7: st, caption: st.caption, ...(type === "presence" ? { charge: { from: 0, to: pattern.length, unit: "rounds" } } : {}) } : null;
+      }
+      // Repair and Breach work on a Wall's HP Grid: shown on a 7x7 sample
+      case "repair": case "breach": {
+        const N = 7, c7 = HGC.aimCells(pattern, { x: 3, y: 3 }, N) || [];
+        const before = Array(N * N).fill(1);
+        const mk7 = (anim, b, a, ch) => ({
+          anim, target: { kind: "wall", id: "demo", name: "Sample Wall", n: N },
+          before: { cells: [...b], marks: { guard: Array(N * N).fill(null), ret: Array(N * N).fill(0), curse: Array(N * N).fill(0) } },
+          after: { cells: [...a], marks: { guard: Array(N * N).fill(null), ret: Array(N * N).fill(0), curse: Array(N * N).fill(0) } }, changes: ch
+        });
+        if (type === "breach") {
+          const after = [...before], ch = [];
+          c7.forEach(i => { ch.push({ idx: i, from: 1, to: 0, wave: 0 }); after[i] = 0; });
+          return { n: N, steps: [mk7("breach", before, after, ch)], caption: "Like breaking a block in Minecraft, but in three heavy hits: THUD... THUD- THUD!! Every cell of the pattern cracks more with each hit, and the last one shatters it." };
+        }
+        const b = [...before], a = [...before], ch = [];
+        c7.forEach((i, k) => { b[i] = k % 2 === 0 ? 0 : 1; a[i] = b[i] + 1; ch.push({ idx: i, from: b[i], to: a[i], wave: 0 }); });
+        return { n: N, steps: [mk7("repair", b, a, ch)], caption: "A hammer hits each cell twice. Empty cells come back healthy, healthy cells gain an Over-heal square. Walls only." };
+      }
       default: return null;                                   // Counter, Weaken, Shield, Penetrate, Spellvamp: no animated preview yet
     }
   }
@@ -553,7 +609,10 @@
     for (let i = 0; i < 25; i++) { const c = document.createElement("div"); c.className = "bf-cell"; f.append(c); cells.push(c); }
     const put = (i, cls) => { const img = document.createElement("img"); img.alt = ""; setImage(img, classIcon(cls)); cells[i].classList.add("other"); cells[i].append(img); };
     if (kind === "hex") { put(12, "Mage"); put(13, "Warrior"); put(6, "Rogue"); put(24, "Tank"); [6, 7, 8, 11, 12, 13, 16, 17, 18].forEach(i => cells[i].classList.add("hex-aura")); }
-    else { put(11, "Support"); put(14, "Warrior"); }
+    else if (kind === "weaken") {
+      put(11, "Support");
+      const m = document.createElement("img"); m.alt = ""; m.src = "/assets/monsters/devil.png"; cells[14].classList.add("monster"); cells[14].append(m);
+    } else { put(11, "Support"); put(14, "Warrior"); }
     return { el: f, cells };
   }
 
@@ -568,14 +627,15 @@
           return rt.anim(o, [{ transform: "scale(.2)", opacity: 0.9 }, { transform: "scale(1.15)", opacity: 0.7, offset: 0.5 }, { transform: "scale(1.3)", opacity: 0 }], { duration: 1000 });
         }));
       } else {
+        const tint = kind === "buff" ? "" : " " + kind;
         const spark = document.createElement("i");
-        spark.className = "bf-spark";
+        spark.className = "bf-spark" + tint;
         c[11].append(spark);
         spark.style.left = "50%"; spark.style.top = "50%";
         await rt.anim(spark, [{ transform: "translate(-50%,-50%) scale(.5)" }, { transform: `translate(calc(-50% + ${c[14].offsetLeft - c[11].offsetLeft}px), -50%) scale(1.4)` }], { duration: 800, easing: "ease-in-out" });
         spark.remove();
         const ring = document.createElement("i");
-        ring.className = "bf-fx buff-ring";
+        ring.className = "bf-fx buff-ring" + tint;
         c[14].append(ring);
         await rt.anim(ring, [{ transform: "scale(.3)", opacity: 1 }, { transform: "scale(1.5)", opacity: 0 }], { duration: 450 });
       }
@@ -622,7 +682,8 @@
         data.rangeFixed ? "A 3×3 around you (1 cell outward)" : data.rangePer ? `${data.rangePer} per position × ${pos} = ${r} cells outward` : `positions − 1 = ${r} cell${r === 1 ? "" : "s"} outward${r === 1 ? ": you must stand next to it" : ""}`);
       row("Works on", type === "breach" ? "Walls (every cell hits) and Monsters (only 1 hit)" : { enemy: "Monsters and Walls (never teammates)", monster: "Monsters (never Walls or teammates)", structure: "Walls only", ally: type === "heal" ? "Teammates, or yourself" : "Teammates (never Monsters)", self: "Yourself" }[data.side] || "Yourself");
       if (data.give) row("Gives", `${fmt(data.give)} Energy per position = ${fmt(data.give * pos)}`);
-      if (data.kind === "charge") row("Charges", `${pos} per use`);
+      if (data.kind === "charge" || data.charges) row("Charges", `${pos} per use${data.charges ? ", put on the Monster" : ""}`);
+      if (type === "weaken") row("Effect", "Each charge: its Attack roll is 1 lower (never below 0), then the charge is spent");
       if (data.kind === "turn") row("Lasts", `${pos} round${pos === 1 ? "" : "s"}`);
       if (data.fixedTurns) row("Lasts", `${data.fixedTurns} rounds, whatever the positions`);
       if (data.maintenance) row("Upkeep", `${data.maintenance} Energy at the start of each of your turns, even below 0. Use the card again to remove it for free.`);
@@ -654,36 +715,42 @@
     const demo = buildDemo(type, pattern);
     const stage = el("div", "cd-demo");
     let play = null;
-    if (demo?.field) {
+    const chargeRow = d => {
+      const row = el("div", "cd-charge"), ci = el("img");
+      ci.alt = "";
+      setImage(ci, data.icon);
+      row.append(ci, el("span", "", "Using the card:"), ...[el("s", "", String(d.from)), el("span", "fx-arrow", ">"), el("b", "", String(d.to))], ...(d.unit ? [el("span", "", d.unit)] : []));
+      return row;
+    };
+    if (demo?.field7) {
+      stage.append(demo.field7.el);
+      if (demo.charge) stage.append(chargeRow(demo.charge));
+      stage.append(el("p", "cd-caption", demo.caption));
+      play = rt => demo.field7.loop(rt);
+    } else if (demo?.field) {
       const mf = miniField(demo.field);
       stage.append(mf.el, el("p", "cd-caption", demo.caption));
       play = rt => loopFieldDemo(rt, demo.field, mf);
     } else if (demo) {
       const parts = el("div", "cd-demo-row");
-      const pat = demoStep("Your pattern", demoGrid("plain", pattern));
-      const grid = el("div", "hp-grid cd-grid");
-      HGFx.buildGrid(grid, DN);
+      const pat = data.noPattern ? null : demoStep("Your pattern", demoGrid("plain", pattern));
+      const N = demo.n || DN;
+      const grid = el("div", "hp-grid cd-grid" + (N > DN ? " big" : ""));
+      HGFx.buildGrid(grid, N);
       const result = el("div", "demo-step");
       result.append(grid, el("small", "", demo.player ? "Your HP Grid" : demo.self ? "Your HP Grid" : "Sample HP Grid"));
       const arrow = el("span", "demo-arrow", "→");
-      parts.append(pat, arrow, result);
+      if (pat) parts.append(pat, arrow, result); else parts.append(result);
       const replay = el("button", "button quiet", "Replay");
       replay.type = "button";
       stage.append(parts);
       let charge = null;
-      if (demo.charge) {
-        charge = el("div", "cd-charge");
-        const ci = el("img");
-        ci.alt = "";
-        setImage(ci, data.icon);
-        charge.append(ci, el("span", "", "Using the card:"), ...[el("s", "", String(demo.charge.from)), el("span", "fx-arrow", ">"), el("b", "", String(demo.charge.to))]);
-        stage.append(charge);
-      }
+      if (demo.charge) { charge = chargeRow(demo.charge); stage.append(charge); }
       stage.append(el("p", "cd-caption", demo.caption), replay);
       play = async rt => {
         while (true) {
           for (const st of demo.steps) await HGFx.playStep(rt, grid, st);
-          if (!demo.steps.length) { HGFx.applyCells(grid, Array(DN * DN).fill(1), {}); }
+          if (!demo.steps.length) { HGFx.applyCells(grid, Array(N * N).fill(1), {}); }
           await rt.wait(1100);
         }
       };
@@ -816,9 +883,13 @@
     $("confirm-card-button").textContent = issued ? "Save" : "Confirm";
     $("cancel-card-button").hidden = !issued;
     say("card-message");
-    const grid = $("card-grid");
-    grid.replaceChildren();
-    for (let i = 0; i < 9; i++) {
+     const grid = $("card-grid"), noPattern = !!CARDS[mode.type].noPattern;
+     grid.parentElement.hidden = noPattern;                       // no grid editor for cards that never use their pattern
+     const note = document.querySelector("#card-screen .warning");
+     if (note) note.textContent = noPattern ? `${CARDS[mode.type].name} doesn't use a pattern, only its ${mode.limit} positions (they set its cost and range). Just name it and save.` : "If you don't know what you are doing, always start at the center.";
+     grid.replaceChildren();
+     if (noPattern) { firstPattern = [...Array(mode.limit).keys()]; refreshCard(); return; }
+     for (let i = 0; i < 9; i++) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "cell";
@@ -1092,7 +1163,7 @@
         const c = f.cell(x, y);
         if (!c) continue;
         c.classList.add("monster");
-        c.dataset.tip = down ? `${m.name} · no HP left` : m.hold > 0 ? `${m.name} · held for ${m.hold} more round${m.hold === 1 ? "" : "s"}` : m.name;
+        c.dataset.tip = down ? `${m.name} · no HP left` : [m.name, m.hold > 0 ? `held for ${m.hold} more round${m.hold === 1 ? "" : "s"}` : "", m.weaken > 0 ? `weakened ×${m.weaken}` : ""].filter(Boolean).join(" · ");
       }
       const el = document.createElement("div");
       el.className = "bf-monster" + (down ? " down" : "") + (m.hold > 0 ? " held" : "") + (st.enc?.phase === "running" && st.enc.turn?.kind === "monster" && st.enc.turn.id === m.id ? " acting" : "");
@@ -1144,7 +1215,7 @@
         const g = document.createElement("img");
         g.className = "clone-ghost" + (st.me && cl.by === st.me.id ? " mine" : "");
         g.alt = "Clone";
-        setImage(g, classIcon("Rogue"));
+        setImage(g, HGC.CARDS.clone.icon);
         c.append(g);
       }
     }
@@ -1416,49 +1487,75 @@
   $("prop-use").addEventListener("click", () => { if (menuProp) socket.emit("prop-use", { id: menuProp }); closePropMenu(); });
   document.addEventListener("click", ev => { if (menuProp && !ev.target.closest("#prop-menu") && !ev.target.closest(".prop")) closePropMenu(); });
 
-  /* ---- Vision Range (Combat): a fixed 5x5 bright window that follows the mouse, kept within your Class Range. Everything else stays visible, just dimmed. ---- */
-  const VISION_N = 5;
-  let visionAt = null;
-  function paintVision() {
-    const f = combatField, self = battle && me();
-    const on = !!self && battle.enc?.phase === "running" && self.inEncounter && !self.dead;
-    f.el.classList.toggle("vision", on);
-    f.el.querySelectorAll(".dim").forEach(e => e.classList.remove("dim"));
-    f.cells.forEach(c => c.classList.remove("vis-l", "vis-r", "vis-t", "vis-b"));
-    if (!on) return;
-    const presenceUp = self.className === "Tank" && self.turns?.presence > 0;
-    const classN = presenceUp ? 7 : battle.classRangeN?.[self.className] || 5;
-    const R = (classN - 1) / 2, h = (VISION_N - 1) / 2;
-    const clamp = (v, c) => Math.max(c - R, Math.min(c + R, v));
-    const cx = clamp(visionAt ? visionAt.x : self.x, self.x), cy = clamp(visionAt ? visionAt.y : self.y, self.y);
-    const bright = (x, y) => Math.abs(x - cx) <= h && Math.abs(y - cy) <= h;
-    for (const c of f.cells) {
-      const x = +c.dataset.x, y = +c.dataset.y;
-      if (bright(x, y)) {
-        if (x === cx - h) c.classList.add("vis-l");
-        if (x === cx + h) c.classList.add("vis-r");
-        if (y === cy - h) c.classList.add("vis-t");
-        if (y === cy + h) c.classList.add("vis-b");
-      } else c.classList.add("dim");
+/* ---- Vision Range (Combat) = your camera ----
+     You always look through a 5x5 window of big cells. Move the camera with W A S D only (one whole cell per press, hold to keep going).
+     Nothing is hidden. An arrow on a side means there is more grid that way; it goes away at the edge of the grid (it is only an indicator).
+     Leash: you can look far, but the window must always keep at least ONE cell touching your Class Range.
+     C (or moving) brings the camera back to you. ---- */
+  const CAM_N = 5, CAM_H = (CAM_N - 1) / 2;
+  const camView = $("cam-view");
+  let cam = null;                                   // null = following you; otherwise the center cell the player panned to
+  let camSelf = null;                               // where you were last time: moving brings the camera back to you
+  const camOn = () => { const self = battle && me(); return !!self && battle.enc?.phase === "running" && self.inEncounter && !self.dead; };
+  // Grid limits of the window center, plus the leash: |center - you| <= half a window + your Class Range radius (that is 1 cell of overlap).
+  function camBounds() {
+    const v = combatField.view || { x0: 0, x1: battle.cols - 1 };
+    const b = { x0: v.x0 + CAM_H, x1: v.x1 - CAM_H, y0: CAM_H, y1: battle.rows - 1 - CAM_H };
+    if (b.x1 < b.x0) b.x0 = b.x1 = (v.x0 + v.x1) / 2;                           // a grid narrower than the window: just center it
+    if (b.y1 < b.y0) b.y0 = b.y1 = (battle.rows - 1) / 2;
+    const self = me(), presenceUp = self.className === "Tank" && self.turns?.presence > 0;
+    const crN = presenceUp ? 7 : battle.classRangeN?.[self.className] || 0;
+    const L = { ...b };
+    if (crN) {
+      const reach = CAM_H + (crN - 1) / 2;
+      L.x0 = Math.max(b.x0, self.x - reach); L.x1 = Math.min(b.x1, self.x + reach);
+      L.y0 = Math.max(b.y0, self.y - reach); L.y1 = Math.min(b.y1, self.y + reach);
     }
-    const inView = (el, cells) => cells.some(([x, y]) => bright(x, y));
-    f.el.querySelectorAll(".bf-monster").forEach(el => {
-      const m = battle.monsters.find(o => o.id === el.dataset.id);
-      if (m && !inView(el, cellsOf(m))) el.classList.add("dim");
-    });
-    f.el.querySelectorAll(".bf-struct").forEach(el => {
-      const cells = el.dataset.cells.split(";").map(s => s.split(",").map(Number));
-      if (!inView(el, cells)) el.classList.add("dim");
-    });
+    return { grid: b, lim: L };
   }
-  combatField.el.addEventListener("mouseover", ev => {
-    const c = ev.target.closest(".bf-cell");
-    if (!c) return;
-    const g = { x: +c.dataset.x, y: +c.dataset.y };
-    if (visionAt && visionAt.x === g.x && visionAt.y === g.y) return;
-    visionAt = g; paintVision();
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  function camCenter() {
+    const self = me(), { grid, lim } = camBounds(), c = cam || { x: self.x, y: self.y };
+    return { x: clamp(c.x, lim.x0, lim.x1), y: clamp(c.y, lim.y0, lim.y1), grid };
+  }
+  function panCam(dx, dy) {
+    if (!camOn()) return;
+    const c = camCenter();
+    cam = { x: c.x + dx, y: c.y + dy };
+    paintVision();
+  }
+  function paintVision() {
+    const f = combatField, on = camOn();
+    camView.classList.toggle("cam-on", on);
+    f.el.classList.toggle("cam", on);
+    const arrows = camView.querySelectorAll(".cam-arrow");
+    if (!on) {
+      f.el.style.removeProperty("--cam-x"); f.el.style.removeProperty("--cam-y");
+      arrows.forEach(a => a.classList.remove("show"));
+      cam = null; camSelf = null;
+      return;
+    }
+    const self = me();
+    if (camSelf && (camSelf.x !== self.x || camSelf.y !== self.y)) cam = null;      // you moved: the camera comes back to you
+    camSelf = { x: self.x, y: self.y };
+    const c = camCenter(), v = f.view || { x0: 0 };
+    const a = f.cell(v.x0, 0), b = f.cell(v.x0 + 1, 0) || f.cell(v.x0, 1);
+    const pitch = a && b ? Math.max(b.offsetLeft - a.offsetLeft, b.offsetTop - a.offsetTop) : 0;
+    if (!pitch) return;
+    f.el.style.setProperty("--cam-x", (-(c.x - CAM_H - v.x0) * pitch) + "px");
+    f.el.style.setProperty("--cam-y", (-(c.y - CAM_H) * pitch) + "px");
+    const g = c.grid, e = 0.01;                                                   // arrows: is there more GRID past the window on that side?
+    const more = { up: c.y > g.y0 + e, down: c.y < g.y1 - e, left: c.x > g.x0 + e, right: c.x < g.x1 - e };
+    arrows.forEach(el => { const k = el.classList.contains("up") ? "up" : el.classList.contains("down") ? "down" : el.classList.contains("left") ? "left" : "right"; el.classList.toggle("show", more[k]); });
+  }
+  window.addEventListener("resize", () => { if (camOn()) requestAnimationFrame(paintVision); });
+  document.addEventListener("keydown", ev => {
+    if (!camOn() || ev.ctrlKey || ev.metaKey || ev.altKey || ev.target.closest?.("input, textarea, select")) return;
+    const k = ev.key.toLowerCase();
+    const d = { a: [-1, 0], d: [1, 0], w: [0, -1], s: [0, 1] }[k];
+    if (d) { ev.preventDefault(); panCam(d[0], d[1]); }
+    else if (k === "c") { cam = null; paintVision(); }
   });
-  combatField.el.addEventListener("mouseleave", () => { visionAt = null; paintVision(); });
 
   // The ghost: where the structure would land if you click the cell under the mouse.
   let ghostAt = null;
@@ -1810,7 +1907,10 @@
           s.title = "Charges";
           b.append(s);
         }
-        if (!compact) b.append(demoGrid(card.type, card.pattern));
+        if (!compact) {
+          if (data.noPattern) { const n = document.createElement("span"); n.className = "demo-positions"; n.textContent = `×${pos}`; n.title = `${pos} positions`; b.append(n); }
+          else b.append(demoGrid(card.type, card.pattern));
+        }
         else {                                                       // Character tab only: hover shows a small X to discard
           const x = document.createElement("span");
           x.className = "discard-x";
@@ -1924,7 +2024,7 @@
       const d = HGC.cheb(self.x, self.y, +c.dataset.x, +c.dataset.y);
       if (d > 0 && d <= range) c.classList.add("in-range");
     }
-    if (fieldAim.cursor) for (const i of card.pattern) f.cell(fieldAim.cursor.x + (i % 3) - 1, fieldAim.cursor.y + Math.floor(i / 3) - 1)?.classList.add("aim-field");
+    if (fieldAim.cursor) for (const i of (CARDS[card.type].noPattern ? [4] : card.pattern)) f.cell(fieldAim.cursor.x + (i % 3) - 1, fieldAim.cursor.y + Math.floor(i / 3) - 1)?.classList.add("aim-field");
   }
   function endFieldAim() {
     if (!fieldAim) return;
@@ -2244,8 +2344,8 @@
       } else aimConfirm(aim);
     });
 
-    ctx.field.el.parentElement.append(el);
-    ctx.field.el.parentElement.classList.add("aiming");
+    (ctx.field.el.closest(".field-wrap") || ctx.field.el.parentElement).append(el);
+    (ctx.field.el.closest(".field-wrap") || ctx.field.el.parentElement).classList.add("aiming");
     currentAim = aim;
     aimRefresh(aim);
     el.querySelector(".aim-use").focus({ preventScroll: true });
@@ -2337,6 +2437,7 @@
       const training = e.ctx === "training";
       const f = training ? trainField : combatField;
       if ($("stage").dataset.tab !== (training ? "activities" : "combat") || !f.cells.length) return;
+      if (HGFxField.handles(e.bf.kind)) { await HGFxField.playReal(f, e.bf, rt); return; }     // Trail, Smoke, Force, Gravity, Clone, Hold, Move (js/fx-field.js)
       if (e.bf.kind === "hex") {
         const cells = [];
         for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const c = f.cell(e.bf.x + dx, e.bf.y + dy); if (c) cells.push(c); }
@@ -2346,18 +2447,6 @@
           c.append(o);
           return rt.anim(o, [{ transform: "scale(.2)", opacity: 0.9 }, { transform: "scale(1.15)", opacity: 0.7, offset: 0.5 }, { transform: "scale(.6)", opacity: 0.9, offset: 0.7 }, { transform: "scale(1.3)", opacity: 0 }], { duration: 1000 });
         }));
-      } else if (e.bf.kind === "displace") {                                // Force / Gravity: flash the pattern, then the Monsters slide (the state already moved them)
-        await Promise.all(e.bf.cells.map(([x, y]) => {
-          const c = f.cell(x, y);
-          if (!c) return null;
-          const o = document.createElement("i");
-          o.className = "bf-fx displace-flash " + e.bf.dir;
-          c.append(o);
-          return rt.anim(o, [{ transform: e.bf.dir === "pull" ? "scale(1.5)" : "scale(.4)", opacity: 0 }, { transform: "scale(1)", opacity: 0.95, offset: 0.4 }, { transform: e.bf.dir === "pull" ? "scale(.5)" : "scale(1.4)", opacity: 0 }], { duration: 800 });
-        }));
-      } else if (e.bf.kind === "move") {
-        const c = f.cell(e.bf.to.x, e.bf.to.y);
-        if (c) { const o = document.createElement("i"); o.className = "bf-fx move-flash"; c.append(o); await rt.anim(o, [{ transform: "scale(.3)", opacity: 0 }, { transform: "scale(1.1)", opacity: 1, offset: 0.4 }, { transform: "scale(1)", opacity: 0 }], { duration: 700 }); }
       } else if (e.bf.kind === "fake") {                                    // the Clone's fake attack: a slash that hurts nobody
         const from = f.cell(e.bf.from.x, e.bf.from.y), to = f.cell(e.bf.to.x, e.bf.to.y);
         if (from && to) {
@@ -2368,53 +2457,20 @@
             rt.anim(o, [{ transform: "scale(.3) rotate(-40deg)", opacity: 0 }, { transform: "scale(1) rotate(0)", opacity: 1, offset: 0.5 }, { transform: "scale(1.2)", opacity: 0 }], { duration: 650, delay: 200 })
           ]);
         }
-      } else if (e.bf.kind === "clone" || e.bf.kind === "clone-off") {
-        if (e.bf.x == null) { await rt.wait(400); return; }
-        const c = f.cell(e.bf.x, e.bf.y);
-        if (c) { const o = document.createElement("i"); o.className = "bf-fx clone-ring"; c.append(o); await rt.anim(o, [{ transform: "scale(.3)", opacity: 0 }, { transform: "scale(1.2)", opacity: 1, offset: 0.5 }, { transform: "scale(1)", opacity: 0 }], { duration: 700 }); }
-      } else if (e.bf.kind === "smoke" || e.bf.kind === "smoke-off" || e.bf.kind === "trail" || e.bf.kind === "trail-off") {
-        if (!e.bf.cells) { await rt.wait(500); }                           // the Host (and, for Trail, the other classes) see nothing
-        else await Promise.all(e.bf.cells.map(([x, y]) => {
-          const c = f.cell(x, y);
-          if (!c) return null;
-          const o = document.createElement("i");
-          o.className = "bf-fx " + (e.bf.kind.startsWith("trail") ? "trail-puff" : "smoke-puff");
-          c.append(o);
-          const on = !e.bf.kind.endsWith("-off");
-          return rt.anim(o, on ? [{ transform: "scale(.2)", opacity: 0 }, { transform: "scale(1.3)", opacity: 0.9, offset: 0.6 }, { transform: "scale(1)", opacity: 0.5 }]
-                               : [{ transform: "scale(1)", opacity: 0.8 }, { transform: "scale(1.6)", opacity: 0 }], { duration: 750 });
-        }));
-      } else if (e.bf.kind === "hold") {
-        const cells = [];
-        for (let dy = 0; dy < e.bf.h; dy++) for (let dx = 0; dx < e.bf.w; dx++) { const c = f.cell(e.bf.x + dx, e.bf.y + dy); if (c) cells.push(c); }
-        await Promise.all(cells.map(c => {
-          const o = document.createElement("i");
-          o.className = "bf-fx hold-ring";
-          c.append(o);
-          return rt.anim(o, [{ transform: "translateY(-120%) scale(1.2)", opacity: 0 }, { transform: "translateY(0) scale(1)", opacity: 1, offset: 0.45 }, { transform: "translateY(0) scale(1.15)", opacity: 1, offset: 0.6 }, { transform: "translateY(0) scale(1)", opacity: 0.8 }], { duration: 800, easing: "ease-in" });
-        }));
-        await rt.wait(250);
-      } else if (e.bf.kind === "shield") {
-        const b = f.cell(e.bf.to.x, e.bf.to.y);
-        if (!b) return;
-        const bubble = document.createElement("i");
-        bubble.className = "bf-fx shield-ring";
-        b.append(bubble);
-        await rt.anim(bubble, [{ transform: "scale(.2)", opacity: 0 }, { transform: "scale(1.25)", opacity: 1, offset: 0.55 }, { transform: "scale(1)", opacity: 1 }], { duration: 700 });
-        await rt.wait(300);
-      } else if (e.bf.kind === "buff") {
-        const a = f.cell(e.bf.from.x, e.bf.from.y), b = f.cell(e.bf.to.x, e.bf.to.y);
+      } else if (e.bf.kind === "buff" || e.bf.kind === "weaken" || e.bf.kind === "shield") {     // Buff, and the same spark + ring in pink (Weaken) and blue (Shield)
+        const tint = e.bf.kind === "buff" ? "" : " " + e.bf.kind, t = e.bf.to;
+        const a = f.cell(e.bf.from.x, e.bf.from.y), b = f.cell(t.x + Math.floor(((t.w || 1) - 1) / 2), t.y + Math.floor(((t.h || 1) - 1) / 2));
         if (!a || !b) return;
         const fr = f.el.getBoundingClientRect(), ar = a.getBoundingClientRect(), br = b.getBoundingClientRect();
         const spark = document.createElement("i");
-        spark.className = "bf-spark";
+        spark.className = "bf-spark" + tint;
         spark.style.left = (ar.left - fr.left + ar.width / 2) + "px";
         spark.style.top = (ar.top - fr.top + ar.height / 2) + "px";
         f.el.append(spark);
         try {
           await rt.anim(spark, [{ transform: "translate(-50%,-50%) scale(.5)", opacity: 1 }, { transform: `translate(calc(-50% + ${br.left - ar.left}px), calc(-50% + ${br.top - ar.top}px)) scale(1.4)`, opacity: 1 }], { duration: 700, easing: "ease-in-out" });
           const ring = document.createElement("i");
-          ring.className = "bf-fx buff-ring";
+          ring.className = "bf-fx buff-ring" + tint;
           b.append(ring);
           await rt.anim(ring, [{ transform: "scale(.3)", opacity: 1 }, { transform: "scale(1.5)", opacity: 0 }], { duration: 450 });
         } finally { spark.remove(); }

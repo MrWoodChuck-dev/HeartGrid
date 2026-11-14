@@ -1,0 +1,111 @@
+/* Heart Grid - Shop (Host 4x2 grid + item editor), the player's Shop screen, and the 5x10 Inventory with Materials. Logic: js/shop-ui.js */
+
+/* ---------- Host: Management > Shop ---------- */
+.shop-host { display: flex; flex-direction: column; align-items: center; gap: clamp(16px, 2.4vh, 28px); padding: 4px 0 32px; }
+.shop-head { display: flex; align-items: center; justify-content: center; gap: clamp(14px, 2vw, 30px); width: 100%; text-align: center; }
+.shop-head-icon { flex: none; width: clamp(72px, 8.5vw, 124px); height: clamp(72px, 8.5vw, 124px); object-fit: contain; }
+.shop-head-icon.sm { width: 44px; height: 44px; }
+.shop-title { margin: 0; font-size: clamp(60px, 9.5vw, 140px); line-height: .95; font-weight: 900; letter-spacing: .03em; text-transform: uppercase; color: var(--gold); text-shadow: 0 4px 0 #000; }
+.shop-hint { margin: 0; max-width: 640px; text-align: center; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.shop-hint b { color: var(--gold); }
+
+/* The grid: every cell is its own 1x1 square with air around it (they never touch). */
+.shop-grid { --cell: clamp(62px, 8.4vw, 124px); display: grid; grid-template-columns: repeat(4, var(--cell)); gap: 26px 20px; width: max-content; max-width: 100%; margin: 0 auto; }
+.shop-slot { display: flex; flex-direction: column; align-items: center; gap: 8px; width: var(--cell); }
+.shop-cell { position: relative; display: grid; place-items: center; width: var(--cell); height: var(--cell); padding: 0; border: 2px solid #3d3d49; border-radius: 12px; background: #17171c; transition: border-color .12s, background .12s, transform .12s; }
+.shop-cell.empty { border-style: dashed; border-color: #34343e; color: #5d5c69; }
+.shop-cell .plus { font-size: calc(var(--cell) * .52); font-weight: 300; line-height: 1; }
+.shop-cell:hover:not(:disabled) { border-color: var(--gold); background: #221f16; transform: translateY(-3px); }
+.shop-cell.empty:hover:not(:disabled) { color: var(--gold); }
+.shop-cell:disabled { opacity: 1; cursor: default; }
+.shop-cell.short { border-color: #5a3a3d; }
+.shop-art { width: 72%; height: 72%; object-fit: contain; pointer-events: none; }
+.shop-count { position: absolute; right: 7px; bottom: 4px; font: 800 14px "Consolas", monospace; text-shadow: 0 2px 0 #000, 0 0 4px #000; pointer-events: none; }
+.shop-cost { min-height: 2.6em; max-width: 100%; text-align: center; font-size: 12px; font-weight: 700; line-height: 1.3; color: var(--gold); overflow-wrap: anywhere; }
+.shop-cost.short { color: var(--red); }
+
+/* ---------- Hover: the item much bigger, with its cost ---------- */
+.shop-hover { position: fixed; z-index: 45; width: 310px; padding: 18px; border: 1px solid #5b5865; border-radius: 16px; background: #1e1d24; box-shadow: 0 18px 60px #000c; pointer-events: none; }
+.shop-hover[hidden] { display: none; }
+.sh-art, .sp-art { display: block; width: 176px; height: 176px; margin: 0 auto 12px; padding: 14px; object-fit: contain; border-radius: 14px; background: #131317; }
+.sh-name { margin: 0 0 2px; font-size: 22px; }
+.sh-kind { display: block; margin-bottom: 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.sh-info { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: #b9b7c0; }
+.sh-label { display: block; margin-bottom: 6px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.sh-cost, .cost-chips { display: flex; flex-direction: column; gap: 6px; }
+.cost-chip { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.cost-chip b { color: var(--gold); min-width: 1.6em; }
+.cost-icon { width: 24px; height: 24px; object-fit: contain; }
+.cost-free { color: var(--green); font-weight: 700; }
+
+/* ---------- Host dialogs: editor + saved item ---------- */
+.shop-dialog { width: min(100%, 560px); max-height: 92vh; overflow: auto; }
+.shop-dialog .assign-fields { margin-top: 14px; }
+.shop-dialog select, .shop-dialog input[type="number"] { height: 42px; padding: 0 12px; border: 1px solid #43434d; border-radius: 8px; background: #131317; color: inherit; font: inherit; }
+.sd-preview { display: flex; align-items: center; gap: 16px; padding: 12px; border: 1px solid #34343e; border-radius: 12px; background: #131317; }
+.sd-art { width: 84px; height: 84px; object-fit: contain; }
+.sd-prev-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sd-prev-text strong { font-size: 20px; }
+.sd-prev-text small { font-size: 13px; color: var(--gold); }
+.sd-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sd-kind { padding: 11px 8px; border: 1px solid #43434d; border-radius: 8px; background: #131317; font-size: 13px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+.sd-kind:hover { color: var(--text); }
+.sd-kind.active { border-color: var(--gold); background: #2a2516; color: var(--gold); }
+.sd-note { margin: 0; font-size: 12px !important; line-height: 1.45 !important; color: var(--muted) !important; }
+.sd-req { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.sd-req-title { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.sd-req-rows { display: flex; flex-direction: column; gap: 8px; }
+.sd-req-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 96px 38px; gap: 8px; align-items: center; }
+.sd-del { height: 38px; border: 1px solid #43434d; border-radius: 8px; background: #131317; font-size: 20px; line-height: 1; color: var(--muted); }
+.sd-del:hover { border-color: var(--red); color: var(--red); }
+.sd-add { align-self: flex-start; }
+.shop-pick { width: min(100%, 380px); text-align: center; }
+.sp-body h2 { margin: 0 0 2px; }
+.sp-body .sh-info { margin-top: 4px; }
+.sp-body .sh-cost { align-items: center; }
+.button.danger:hover { border-color: var(--red); color: var(--red); }
+.assign-zones { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+@media (max-width: 1280px) { .assign-zones { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* ---------- Player: the Shop screen ---------- */
+.shop-overlay { position: fixed; inset: 0; z-index: 15; display: flex; flex-direction: column; overflow: auto; background: var(--bg); }
+.shop-overlay[hidden] { display: none; }
+.so-bar { flex: none; display: flex; align-items: center; gap: clamp(14px, 2.4vw, 36px); flex-wrap: wrap; padding: 14px clamp(14px, 2.4vw, 36px); border-bottom: 1px solid var(--line); background: var(--panel); }
+.so-title { display: flex; align-items: center; gap: 12px; }
+.so-title h1 { margin: 0; font-size: 36px; letter-spacing: .04em; text-transform: uppercase; color: var(--gold); }
+.so-tabs { display: flex; gap: 6px; }
+.so-tab { padding: 12px 24px; border: 1px solid var(--line); border-radius: 10px; background: none; font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.so-tab:hover { color: var(--text); }
+.so-tab.active { border-color: var(--gold); background: #2a2516; color: var(--gold); }
+.so-mats { display: flex; gap: 12px; margin-left: auto; }
+.mat-chip { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: #131317; font-size: 14px; }
+.so-pane { display: none; flex: 1; min-height: 0; padding: clamp(18px, 3vh, 36px) clamp(14px, 2.4vw, 36px); }
+.so-pane.active { display: block; }
+.shop-empty { margin: 28px 0 0; font-size: 18px; color: var(--muted); }
+.shop-empty[hidden] { display: none; }
+#so-grid .shop-cell:not(:disabled) { cursor: pointer; }
+
+/* ---------- Inventory (5x10) + Materials ---------- */
+.inv-view { flex: 1; min-height: 0; }
+.inv-layout { display: flex; align-items: flex-start; gap: clamp(24px, 3vw, 48px); }
+.inv-grid { --cell: clamp(52px, calc((100vh - 190px) / 10 - 6px), 110px); flex: none; display: grid; grid-template-columns: repeat(5, var(--cell)); gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.shop-overlay .inv-grid { --cell: clamp(52px, calc((100vh - 175px) / 10 - 6px), 110px); }
+.inv-slot { position: relative; display: grid; place-items: center; width: var(--cell); height: var(--cell); border: 1px solid #34343e; border-radius: 8px; background: #121216; }
+.inv-slot.filled { border-color: #55525f; background: #1b1b21; }
+.inv-slot.filled:hover { border-color: var(--gold); }
+.inv-art { width: 74%; height: 74%; object-fit: contain; pointer-events: none; }
+.inv-slot .shop-count { right: 4px; bottom: 2px; font-size: 12px; }
+/* The wide empty area to the right of the grid is kept free on purpose (future update). Materials sit at its left edge. */
+.inv-side { flex: none; width: 270px; display: flex; flex-direction: column; gap: 10px; }
+.inv-side .side-heading { margin: 0; }
+.mat-list { display: flex; flex-direction: column; gap: 8px; }
+.mat-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.mat-icon { flex: none; width: 32px; height: 32px; object-fit: contain; }
+.mat-icon.sm { width: 24px; height: 24px; }
+.mat-name { flex: 1; min-width: 0; font-size: 13px; line-height: 1.2; }
+.mat-count { font: 800 18px "Consolas", monospace; color: var(--gold); }
+@media (max-width: 900px) {
+  .shop-grid { --cell: clamp(62px, 18vw, 110px); }
+  .inv-layout { flex-direction: column; }
+  .inv-side { width: 100%; }
+}

@@ -29,35 +29,29 @@
     attack:    { name: "Attack",    group: "hp-grid",      kind: "grid",   side: "enemy", costPer: 1 },
     blast:     { name: "Blast",     group: "hp-grid",      kind: "grid",   side: "enemy", costPer: 1.5, rangePer: 3, multi: 2 },
     curse:     { name: "Curse",     group: "hp-grid",      kind: "grid",   side: "enemy", costPer: 1.5 },
-    execute:   { name: "Execute",   group: "unique-type",  kind: "random", side: "enemy", costPer: 1.5 },
+    execute:   { name: "Execute",   group: "unique-type",  kind: "random", noPattern: true, side: "enemy", costPer: 1.5 },
     heal:      { name: "Heal",      group: "hp-grid",      kind: "grid",   side: "ally",  costPer: 1, allowSelf: true },
     guard:     { name: "Guard",     group: "hp-grid",      kind: "grid",   side: "ally",  costPer: 1 },
-    buff:      { name: "Buff",      group: "unique-type",  kind: "pick",   side: "ally",  costPer: 1, give: 1.5 },
+    buff:      { name: "Buff",      group: "unique-type",  kind: "pick",   noPattern: true, side: "ally",  costPer: 1, give: 1.5 },
     retaliate: { name: "Retaliate", group: "hp-grid",      kind: "grid",   side: "self",  costPer: 1, noRange: true },
     rage:      { name: "Rage",      group: "hp-grid",      kind: "grid",   side: "self",  costPer: 0, noRange: true, perCell: 2 },
-    taunt:     { name: "Taunt",     group: "charge-based", kind: "charge", side: "self",  costPer: 1, noRange: true },
-    lifesteal: { name: "Lifesteal", group: "charge-based", kind: "charge", side: "self",  costPer: 1, noRange: true },
-    poison:    { name: "Poison",    group: "charge-based", kind: "charge", side: "self",  costPer: 0.5, noRange: true },
-    hex:       { name: "Hex",       group: "unique-type",  kind: "aura",   side: "self",  costPer: 1, noRange: true, discount: 2 },
-    // Placeholders until encounters, initiative and dice exist: only the png is in the game.
-    counter:   { name: "Counter",   group: "turn-based",   kind: "turn",   side: "self",  costPer: 1, noRange: true },
-    weaken:    { name: "Weaken",    group: "charge-based", kind: "stub" },
-    shield:    { name: "Shield",    group: "turn-based",   kind: "pick",   side: "ally",  costPer: 2.5, rangeFixed: 1, turns: true },
-    penetrate: { name: "Penetrate", group: "charge-based", kind: "charge", side: "self",  costPer: 1, noRange: true },
+    taunt:     { name: "Taunt",     group: "charge-based", kind: "charge", noPattern: true, side: "self",  costPer: 1, noRange: true },
+    lifesteal: { name: "Lifesteal", group: "charge-based", kind: "charge", noPattern: true, side: "self",  costPer: 1, noRange: true },
+    poison:    { name: "Poison",    group: "charge-based", kind: "charge", noPattern: true, side: "self",  costPer: 0.5, noRange: true },
+    hex:       { name: "Hex",       group: "unique-type",  kind: "aura",   noPattern: true, side: "self",  costPer: 1, noRange: true, discount: 2 },
+    counter:   { name: "Counter",   group: "turn-based",   kind: "turn",   noPattern: true, side: "self",  costPer: 1, noRange: true },
+    weaken:    { name: "Weaken",    group: "charge-based", kind: "pick",   noPattern: true, side: "monster", costPer: 1, charges: true },
+    shield:    { name: "Shield",    group: "turn-based",   kind: "pick",   noPattern: true, side: "ally",  costPer: 2.5, rangeFixed: 1, turns: true },
+    penetrate: { name: "Penetrate", group: "charge-based", kind: "charge", noPattern: true, side: "self",  costPer: 1, noRange: true },
     spellvamp: { name: "Spellvamp", group: "hp-grid",      kind: "grid",   side: "enemy", costPer: 1.5 },
-    // ---- Tank
-    presence:  { name: "Presence",  group: "turn-based",   kind: "turn",   side: "self",  costPer: 1, noRange: true },
-    hold:      { name: "Hold",      group: "turn-based",   kind: "pick",   side: "monster", costPer: 1, turns: true, fixedTurns: 2 },
-    // ---- Warrior
+    presence:  { name: "Presence",  group: "turn-based",   kind: "turn",   noPattern: true, side: "self",  costPer: 1, noRange: true },
+    hold:      { name: "Hold",      group: "turn-based",   kind: "pick",   noPattern: true, side: "monster", costPer: 1, turns: true, fixedTurns: 2 },
     trail:     { name: "Trail",     group: "battlefield-grid", kind: "field", side: "self", costPer: 1, rangePer: 2, maintenance: 1, marks: "trail" },
     breach:    { name: "Breach",    group: "hp-grid",      kind: "grid",   side: "enemy", costPer: 1.5, breach: true },
-    // ---- Support
     repair:    { name: "Repair",    group: "hp-grid",      kind: "grid",   side: "structure", costPer: 1 },
-    move:      { name: "Move",      group: "unique-type",  kind: "move",   side: "ally",  costPer: 1 },
-    // ---- Rogue
+    move:      { name: "Move",      group: "unique-type",  kind: "move",   noPattern: true, side: "ally",  costPer: 1 },
     smoke:     { name: "Smoke",     group: "battlefield-grid", kind: "field", side: "self", costPer: 1, rangePer: 2, maintenance: 1, marks: "smoke" },
-    clone:     { name: "Clone",     group: "unique-type",  kind: "clone",  side: "self",  costPer: 1, rangePer: 2 },
-    // ---- Mage
+    clone:     { name: "Clone",     group: "unique-type",  kind: "clone",  noPattern: true, side: "self",  costPer: 1, rangePer: 2 },
     force:     { name: "Force",     group: "battlefield-grid", kind: "displace", side: "self", costPer: 1, rangePer: 2, dir: "push" },
     gravity:   { name: "Gravity",   group: "battlefield-grid", kind: "displace", side: "self", costPer: 1, rangePer: 2, dir: "pull", noCenter: true }
   };
@@ -89,7 +83,7 @@
     poison:    { tip: "Your Attacks also eat a random cell with acid.", detail: "Gives you Poison charges (one per position). Every Attack you use spends 1 charge and damages a random healthy or Over-heal cell of the Monster for a random 1 up to the card's positions. Poison cannot damage Armored cells by itself. It hits healthy cells first, and only when nothing else is left do your Penetrate charges strip an Armored cell for it (1 charge = 1 damage)." },
     hex:       { tip: "Anyone standing in a 3x3 around you pays 2 less Energy per card.", detail: "Creates an aura on a 3x3 centered on the Mage. Anyone inside pays 2 less Energy for their cards (never below 0.5). The Mage is always affected, except for Hex cards." },
     counter:   { tip: "Hit back: a bonus action after a Monster damages you.", detail: "A self card. Every position is 1 round of Counter. While it lasts, if a Monster damages you even once, you get a bonus action right after that Monster's turn, and you gain +6 Energy for it. It doesn't matter how far the Monster is." },
-    weaken:    { tip: "Reduce the Monster's next damage. (Coming soon)", detail: "Coming soon. Weaken needs the dice system first." },
+    weaken:    { tip: "Lowers the dice a Monster rolls for its Attack.", detail: "Pick one Monster in range. It gets Weaken charges, one per position. When it rolls its Attack die, every charge lowers the roll by 1 (never below 0) and is spent doing it. Charges it doesn't need yet stay on it for later rolls. Walls can't be weakened." },
     shield:    { tip: "Makes a teammate untargetable for a few rounds.", detail: "Pick one teammate in the 3x3 around you. Every position is 1 round of Shield: the Host cannot select that player to attack or debuff. When it ends they enter Shield Break, which lasts 3 rounds longer than the Shield did (a 3 round Shield means 6 rounds of Break) and stops you from shielding them again. You can only shield 1 player at a time." },
     penetrate: { tip: "Your Attacks are not punished by Armor, and they strip it.", detail: "Gives you Penetrate charges (one per position). When your Attack damages an Armored cell, 1 charge keeps Armor from punishing you. After your Attack, every charge you have left removes the Armor of a random Armored cell, however far it is. With Poison, the charges let it hit Armored cells when it has nothing else to hit." },
     spellvamp: { tip: "Strips Armor and Over-heal from Monster cells and charges you.", detail: "Aim your pattern on a Monster's HP Grid. Every Armored cell and every Over-heal cell it touches gives you 1 Spellvamp charge (a cell with both gives 2) and loses that layer. It deals no damage, and Armor can't punish it. Your Blast spends a charge per damaged cell to heal you: an empty cell becomes healthy, or a healthy cell becomes Over-heal." }

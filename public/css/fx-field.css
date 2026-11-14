@@ -1,0 +1,63 @@
+/* Heart Grid - Battlefield card animations (Trail, Smoke, Force, Gravity, Clone, Hold, Move, Presence, Repair, Breach). Logic: js/fx-field.js and js/fx.js */
+
+.battlefield { position: relative; }
+.fxf-layer { position: absolute; inset: 0; z-index: 8; pointer-events: none; overflow: visible; }
+.fxf-layer > * { position: absolute; pointer-events: none; }
+
+/* ---------- 7x7 sample grid in the card dialog ---------- */
+.mini-field.mf7 { position: relative; grid-template-columns: repeat(7, 40px); grid-template-rows: repeat(7, 40px); overflow: hidden; border-radius: 6px; }
+.mini-field.mf7 .bf-cell { width: 40px; height: 40px; }
+.mini-field.mf7 .bf-monster { z-index: 2; }
+.fxf-zone { background-image: linear-gradient(#f3c75126, #f3c75126); box-shadow: inset 0 0 0 1px #f3c75166; }
+.mini-field.mf7 .presence-zone { box-shadow: inset 0 0 0 1px #ff6b73aa; background-image: linear-gradient(#ff6b7330, #ff6b7330); }
+
+/* ---------- Trail ---------- */
+.fxf-glow { border-radius: 4px; background: #f3c751; opacity: 0; }
+
+/* ---------- Smoke / Clone ---------- */
+.fxf-fog { border-radius: 24%; background: radial-gradient(circle, #d6dae1 0%, #aeb4bf 62%, #aeb4bf00 100%); opacity: 0; }
+
+/* ---------- Hold ---------- */
+.fxf-holdicon { height: auto; object-fit: contain; opacity: 0; transform: translate(-50%, -50%); z-index: 3; }
+.fxf-flash { border-radius: 6px; background: #fff; opacity: 0; mix-blend-mode: screen; }
+.fxf-shock { border-radius: 50%; border: 5px solid #fff; opacity: 0; transform: translate(-50%, -50%); }
+.fxf-shock.push { border-color: #ffb86b; }
+.fxf-shock.pull { border-color: #b58bff; }
+.fxf-dust { border-radius: 50%; background: #e8dcc0; opacity: 0; transform: translate(-50%, -50%); }
+
+/* ---------- Move ---------- */
+.fxf-orbit { width: 0; height: 0; opacity: 0; }
+.fxf-track { position: absolute; left: 50%; top: 50%; border-radius: 50%; border: 2px dashed #7be6a566; transform: translate(-50%, -50%); }
+.fxf-arrow { position: absolute; left: 0; top: 0; }
+
+/* ---------- Force / Gravity: the tornado ---------- */
+.fxf-tornado { width: 0; height: 0; opacity: 0; }
+.fxf-ring { position: absolute; left: 0; top: 0; border-radius: 50%; border-style: solid; border-color: #ffb86b; border-right-color: transparent; border-bottom-color: transparent; box-sizing: border-box; }
+.fxf-spoke { position: absolute; left: 0; top: 0; border-radius: 3px; background: #ffb86b; }
+.fxf-tornado.pull .fxf-ring { border-color: #b58bff; border-right-color: transparent; border-bottom-color: transparent; }
+.fxf-tornado.pull .fxf-spoke { background: #b58bff; }
+.fxf-streak { height: 4px; border-radius: 2px; background: #ffb86b; opacity: 0; transform-origin: 0 50%; }
+.fxf-streak.pull { background: #b58bff; }
+
+/* ---------- Presence: the screen full of "!" ---------- */
+.fxf-danger { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; overflow: hidden; background: #1d0003; pointer-events: auto; }
+.fxf-danger.scoped { position: absolute; z-index: 9; border-radius: 6px; }
+.fxf-bang { display: block; font: 900 1em/1 "Impact", "Arial Black", sans-serif; color: #ff2d3a; text-shadow: 0 .06em 0 #000; opacity: 0; }
+.fxf-bang.amber { color: #ffd45a; text-shadow: 0 .06em 0 #000; }
+
+/* ---------- Repair (hammer) and Breach (cracks), on an HP Grid ---------- */
+.fx-o.hammer { inset: auto; left: 28%; top: -1%; width: 150%; height: 150%; z-index: 9; transform-origin: 50% 100%; opacity: 0; overflow: visible; }
+.fx-o.hammer svg { display: block; width: 100%; height: 100%; overflow: visible;  }
+.fx-o.spark { inset: auto; left: 50%; top: 50%; width: 16%; height: 16%; border-radius: 50%; background: #ffd45a; z-index: 8; opacity: 0; }
+.fx-o.crack { z-index: 6; opacity: 1; }
+.fx-o.crack svg { display: block; width: 100%; height: 100%; }
+.fx-o.shard { inset: auto; left: 50%; top: 50%; width: 46%; height: 46%; background: var(--green); z-index: 8; opacity: 0; }
+.fx-o.shard.over { background: var(--overheal); }
+.fx-o.thud { inset: auto; left: -20%; right: -20%; top: 50%; z-index: 12; display: block; text-align: center; font: 900 clamp(20px, 5vmin, 34px) "Impact", "Arial Black", sans-serif; letter-spacing: .08em; color: #fff; -webkit-text-stroke: 2px #000; text-shadow: 0 4px 0 #000; opacity: 0; transform: translateY(-50%); white-space: nowrap; }
+.hp-grid.cd-grid.big { width: 224px; gap: 2px; }
+
+@media (prefers-reduced-motion: reduce) { .fxf-danger { background: #1d0003; } }
+
+/* Taunt / Counter guide samples */
+.fxf-beam { height: 5px; margin-top: -2.5px; border-radius: 3px; transform-origin: 0 50%; opacity: 0; }
+.fxf-text { white-space: nowrap; font: 900 15px "Impact", "Arial Black", sans-serif; letter-spacing: .06em; -webkit-text-stroke: 3px #000; paint-order: stroke fill; transform: translate(-50%, -50%); opacity: 0; z-index: 4; }

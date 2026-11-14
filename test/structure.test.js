@@ -11,7 +11,7 @@ const B = S.create({ COLS, ROWS, ZONE_START, occupied, reservedCells: () => new 
 assert.deepStrictEqual(HGS.shapeCells("wall_gen", 5, 5, 1), [{ x: 5, y: 5 }, { x: 5, y: 6 }]);
 assert.strictEqual(HGS.shapeCells("crafting", 5, 5, 0).length, 3);
 assert.strictEqual(HGS.cellName(10, 0), "11A");
-assert.strictEqual(HGS.iconOf({ type: "wall_gen", piece: 1 }), "wall_generator_2.png");
+assert.strictEqual(HGS.iconOf({ type: "wall_gen", piece: 1 }), "wall_output.png");
 assert.strictEqual(HGS.labelOf({ type: "wall_gen", piece: 1 }), "Wall Generator · Output");
 
 // every room starts with the Shop: 4 pieces in the Dropship Area, working while connected in ANY arrangement

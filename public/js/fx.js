@@ -111,6 +111,16 @@ window.HGFx = (() => {
     }
   }
 
+  // The Repair hammer (head on top, handle below: it swings around the bottom of the handle).
+  const HAMMER_SVG = '<svg viewBox="0 0 100 100"><rect x="44" y="30" width="12" height="68" rx="4" fill="#b07a3e" stroke="#2b303b" stroke-width="3"/><rect x="16" y="6" width="68" height="30" rx="7" fill="#8b93a3" stroke="#2b303b" stroke-width="4"/></svg>';
+  // Breach cracks, 3 stages. Every stage keeps the cracks of the one before.
+  const CRACK_PATHS = [
+    "M50 50 L38 30 M50 50 L66 36 M50 50 L44 72",
+    "M50 50 L38 30 M50 50 L66 36 M50 50 L44 72 M38 30 L28 22 M38 30 L40 14 M66 36 L82 32 M66 36 L74 20 M44 72 L34 86 M44 72 L60 82 M50 50 L24 58",
+    "M50 50 L38 30 M50 50 L66 36 M50 50 L44 72 M38 30 L28 22 M38 30 L40 14 M66 36 L82 32 M66 36 L74 20 M44 72 L34 86 M44 72 L60 82 M50 50 L24 58 M28 22 L14 24 M28 22 L20 8 M82 32 L94 44 M74 20 L84 8 M34 86 L18 90 M60 82 L72 94 M24 58 L8 52 M24 58 L14 74 M50 50 L82 62 M82 62 L94 70 M50 50 L60 14"
+  ];
+  const crackSvg = k => `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${CRACK_PATHS[k]}" fill="none" stroke="#050507" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="${CRACK_PATHS[k]}" fill="none" stroke="#ffffffb0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
   const RECIPES = {
     async pop(rt, grid, st) {
       await Promise.all(wave0(st).map(c => popCell(rt, grid, c)));
@@ -126,16 +136,15 @@ window.HGFx = (() => {
       }));
     },
 
+    // Blast: the damaged cell glows in the explosion gradient, then ends as an enlarged puff of smoke that fades away.
     async blast(rt, grid, st) {
-      await Promise.all(wave0(st).map(c => {
+      await Promise.all(wave0(st).map(async (c, n) => {
         const cell = cellOf(grid, c.idx);
-        setHp(cell, c.to);
         const fire = add(cell, "blast-fire");
         const smoke = add(cell, "smoke");
-        return Promise.all([
-          rt.anim(fire, [{ transform: "scale(.3)", opacity: 1 }, { transform: "scale(1.5)", opacity: 1, offset: 0.55 }, { transform: "scale(2)", opacity: 0 }], { duration: 520 }),
-          rt.anim(smoke, [{ transform: "scale(.6) translateY(0)", opacity: 0 }, { transform: "scale(1.4) translateY(-10%)", opacity: 0.8, offset: 0.35 }, { transform: "scale(2.6) translateY(-45%)", opacity: 0 }], { duration: 900, delay: 220 })
-        ]);
+        await rt.anim(fire, [{ opacity: 0 }, { opacity: 1, offset: .35 }, { opacity: 1, offset: .7 }, { opacity: 0 }], { duration: 560, delay: n * 40, easing: "ease-in-out" });
+        setHp(cell, c.to);
+        await rt.anim(smoke, [{ transform: "scale(.7)", opacity: 0 }, { transform: "scale(1.5)", opacity: .95, offset: .3 }, { transform: "scale(2.8)", opacity: 0 }], { duration: 950 });
       }));
     },
 
@@ -156,6 +165,43 @@ window.HGFx = (() => {
         await rt.anim(acid, [{ opacity: 0 }, { opacity: 1 }], { duration: 750, easing: "ease-in" });
         setHp(cell, c.to);
         await rt.anim(acid, [{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(.85)" }], { duration: 420 });
+      }));
+    },
+
+    // Spellvamp: the cells shake wildly in purple, then pop away, taking their Armor and Over-heal with them.
+    async spellvamp(rt, grid, st) {
+      const cells = [...new Set([...markChanges(st, false).filter(c => c.mark === "armor").map(c => c.idx), ...hpChanges(st).map(c => c.idx)])];
+      const WILD = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(k => ({ transform: `translate(${k % 2 ? -1 : 1}px, 0)` }));
+      await Promise.all(cells.map(async (idx, n) => {
+        const cell = cellOf(grid, idx);
+        const vamp = add(cell, "vamp");
+        const kf = WILD.map((f, k) => ({ transform: `translate(${(k % 2 ? -1 : 1) * (3 + (k % 3) * 2)}px, ${(k % 3 - 1) * 2}px) rotate(${(k % 2 ? -1 : 1) * 4}deg)` }));
+        await Promise.all([
+          rt.anim(cell, kf, { duration: 760, delay: n * 50, fill: "none", easing: "linear" }),
+          rt.anim(vamp, [{ opacity: 0 }, { opacity: .95, offset: .3 }, { opacity: .95 }], { duration: 760, delay: n * 50 })
+        ]);
+        const hp = hpChanges(st).find(c => c.idx === idx);
+        if (hp) setHp(cell, hp.to);
+        cell.classList.remove("armored");
+        await rt.anim(vamp, [{ transform: "scale(1)", opacity: .95 }, { transform: "scale(1.5)", opacity: 1, offset: .35 }, { transform: "scale(.1)", opacity: 0 }], { duration: 380 });
+      }));
+    },
+
+    // Penetrate: a lance goes through the Armor, which cracks in two and falls away.
+    async penetrate(rt, grid, st) {
+      const arm = markChanges(st, false).filter(c => c.mark === "armor");
+      await Promise.all(arm.map(async (c, n) => {
+        await rt.wait(n * 260);
+        const cell = cellOf(grid, c.idx);
+        const lance = add(cell, "lance");
+        await rt.anim(lance, [{ transform: "translateY(-260%)", opacity: 1 }, { transform: "translateY(0)", opacity: 1 }], { duration: 170, easing: "cubic-bezier(.7,0,1,.6)" });
+        const l = add(cell, "armor-half left"), r = add(cell, "armor-half right");
+        cell.classList.remove("armored");
+        await Promise.all([
+          rt.anim(l, [{ transform: "translate(0,0) rotate(0deg)", opacity: 1 }, { transform: "translate(-70%, 90%) rotate(-30deg)", opacity: 0 }], { duration: 520, easing: "ease-in" }),
+          rt.anim(r, [{ transform: "translate(0,0) rotate(0deg)", opacity: 1 }, { transform: "translate(70%, 90%) rotate(30deg)", opacity: 0 }], { duration: 520, easing: "ease-in" }),
+          rt.anim(lance, [{ opacity: 1 }, { opacity: 0 }], { duration: 420, delay: 80 })
+        ]);
       }));
     },
 
@@ -212,6 +258,64 @@ window.HGFx = (() => {
       }));
     },
 
+    // Repair: a hammer hits the cell twice. The second hit mends it.
+    async repair(rt, grid, st) {
+      await Promise.all(hpChanges(st).map(async (c, n) => {
+        await rt.wait(n * 260);
+        const cell = cellOf(grid, c.idx);
+        const hm = add(cell, "hammer");
+        hm.innerHTML = HAMMER_SVG;
+        const pose = (y, rot, o = 1) => ({ transform: `translateY(${y}%) rotate(${rot}deg)`, opacity: o });
+        const bonk = async big => {
+          await rt.anim(hm, [pose(-42, 26), pose(0, -28)], { duration: big ? 150 : 190, easing: "cubic-bezier(.7,0,1,.6)" });          // swing down
+          const sp = [0, 1, 2, 3, 4].map(i => {
+            const o = add(cell, "spark"), a = i / 5 * Math.PI * 2 + .6;
+            return rt.anim(o, [{ transform: "translate(-50%,-50%) scale(.6)", opacity: 1 }, { transform: `translate(calc(-50% + ${Math.cos(a) * 160}%), calc(-50% + ${Math.sin(a) * 160}%)) scale(.2)`, opacity: 0 }], { duration: 330 });
+          });
+          await Promise.all([rt.anim(cell, [{ transform: "scale(1)" }, { transform: `scale(${big ? .7 : .84})` }, { transform: "scale(1)" }], { duration: 190, fill: "none" }), ...sp,
+            rt.anim(hm, [pose(0, -28), pose(0, -32), pose(0, -28)], { duration: 120, fill: "forwards" })]);
+        };
+        await bonk(false);
+        await rt.anim(hm, [pose(0, -28), pose(-40, 22)], { duration: 200, easing: "ease-out" });
+        await bonk(true);
+        const ghost = add(cell, c.to === 2 ? "ghost-over" : "ghost-hp");
+        await Promise.all([
+          rt.anim(ghost, [{ transform: "scale(0)", opacity: 0.3 }, { transform: "scale(1.3)", opacity: 1, offset: 0.6 }, { transform: "scale(1)", opacity: 1 }], { duration: 420 }),
+          rt.anim(hm, [pose(0, -28), pose(-60, 30, 0)], { duration: 420, delay: 120 })
+        ]);
+      }));
+    },
+
+    // Breach: like breaking a block in Minecraft, but in 3 separate hits: THUD... THUD- THUD!! Each hit cracks the cell more, the last one shatters it.
+    async breach(rt, grid, st) {
+      const ch = wave0(st);
+      const cracks = ch.map(c => add(cellOf(grid, c.idx), "crack"));
+      const WORDS = ["THUD.", "THUD-", "THUD!!"], GAPS = [760, 260];
+      for (let k = 0; k < 3; k++) {
+        cracks.forEach(o => { o.innerHTML = crackSvg(k); });
+        const word = add(grid, "thud");
+        word.textContent = WORDS[k];
+        await Promise.all([
+          rt.anim(word, [{ transform: `translateY(-50%) scale(${.5 + k * .15})`, opacity: 0 }, { transform: `translateY(-50%) scale(${1.25 + k * .2})`, opacity: 1, offset: .25 }, { transform: `translateY(-70%) scale(${1 + k * .1})`, opacity: 0 }], { duration: 560 + k * 120 }),
+          rt.anim(grid, [{ transform: "translate(0,0)" }, { transform: `translate(${-3 - k * 3}px, ${2 + k * 2}px)` }, { transform: `translate(${3 + k * 3}px, ${-2 - k * 2}px)` }, { transform: `translate(${-2 - k * 2}px, ${-1 - k}px)` }, { transform: "translate(0,0)" }], { duration: 200 + k * 60, fill: "none" }),
+          ...cracks.map(o => rt.anim(o, [{ transform: "scale(1.22)", filter: "brightness(2.2)" }, { transform: "scale(1)", filter: "brightness(1)" }], { duration: 190, fill: "none" }))
+        ]);
+        if (k < 2) await rt.wait(GAPS[k]);
+      }
+      await Promise.all(ch.map((c, n) => {
+        const cell = cellOf(grid, c.idx);
+        setHp(cell, c.to);
+        const over = c.from === 2;
+        const bits = Array.from({ length: 7 }, (_, i) => {
+          const sh = add(cell, "shard" + (over ? " over" : "")), a = i / 7 * Math.PI * 2 + n, far = 90 + (i % 3) * 40;
+          sh.style.clipPath = `polygon(${10 + (i * 13) % 30}% 0, 100% ${20 + (i * 17) % 40}%, ${60 + (i * 7) % 30}% 100%, 0 ${50 + (i * 11) % 40}%)`;
+          return rt.anim(sh, [{ transform: "translate(-50%,-50%) scale(1) rotate(0deg)", opacity: 1 }, { transform: `translate(calc(-50% + ${Math.cos(a) * far}%), calc(-50% + ${Math.sin(a) * far + 40}%)) scale(.4) rotate(${(i % 2 ? 1 : -1) * 240}deg)`, opacity: 0 }], { duration: 620, easing: "cubic-bezier(.2,.6,.4,1)" });
+        });
+        cracks[n].remove();
+        return Promise.all([popCell(rt, grid, c), ...bits]);
+      }));
+    },
+
     // Lifesteal: the top row turns red, then the middle, then the bottom. Empty cells it heals swell green.
     // Then the red fades away from top to bottom.
     async lifesteal(rt, grid, st) {
@@ -224,12 +328,12 @@ window.HGFx = (() => {
         grid.append(o);
         return o;
       });
-      for (const o of rows) await rt.anim(o, [{ opacity: 0 }, { opacity: 0.55 }], { duration: 170 });
+      for (const o of rows) await rt.anim(o, [{ opacity: 0 }, { opacity: 0.92 }], { duration: 170 });
       await Promise.all(hpChanges(st).map(c => {
         const ghost = add(cellOf(grid, c.idx), "ghost-hp");
         return rt.anim(ghost, [{ transform: "scale(0)", opacity: 0.4 }, { transform: "scale(1.45)", opacity: 1, offset: 0.55 }, { transform: "scale(1)", opacity: 1 }], { duration: 480 });
       }));
-      for (const o of rows) await rt.anim(o, [{ opacity: 0.55 }, { opacity: 0 }], { duration: 170 });
+      for (const o of rows) await rt.anim(o, [{ opacity: 0.92 }, { opacity: 0 }], { duration: 170 });
     }
   };
 
@@ -283,7 +387,7 @@ window.HGFx = (() => {
     let i = 0;
     S.icon.onerror = () => { if (++i < chain.length) { S.icon.src = chain[i]; return; } S.icon.onerror = null; S.icon.src = "/assets/missing.png"; };
     S.icon.src = chain[0];
-    S.title.textContent = e.type === "strike" ? `${e.actor.name} attacks` : `${e.actor.name} used ${e.name}`;
+    S.title.textContent = e.type === "strike" ? `${e.actor.name} attacks` : e.type === "presence" ? `${e.actor.name} the Tank activated Presence` : `${e.actor.name} used ${e.name}`;
   }
 
   async function playMain(e) {
@@ -294,8 +398,16 @@ window.HGFx = (() => {
     S.el.hidden = false;
     S.el.classList.add("show");
 
+    // Presence: every screen fills with "!" and fades to black. The card then shows who activated it.
+    let away = null;
+    if (e.type === "presence" && window.HGFxField) {
+      const danger = await window.HGFxField.presenceDanger(rt, document.body, false);
+      away = danger.fadeAway();
+    }
+
     // 1. the icon shakes for 0.3 seconds (Guard hidden from the Host: this is all the Host sees of it)
     await rt.anim(S.icon, SHAKE_ICON, { duration: 300, fill: "none" });
+    if (away) await away;
 
     if (e.mode === "charge") {
       // charge / turn-based: the icon explodes, comes back, and the stacks show "old > new"
@@ -317,6 +429,8 @@ window.HGFx = (() => {
       S.card.classList.add("small");
       let shownId = null;
       for (const st of e.steps) {
+        if (e.type === "repair") st.anim = "repair";                         // the server sends these as "heal" / "pop"; they get their own animation
+        else if (e.type === "breach" && st.anim === "pop") st.anim = "breach";
         const key = st.target.kind + st.target.id;
         if (key !== shownId) {
           shownId = key;
@@ -352,6 +466,7 @@ window.HGFx = (() => {
     } finally {
       S.el.classList.remove("show");
       S.el.hidden = true;
+      document.querySelectorAll(".fxf-danger:not(.scoped)").forEach(o => o.remove());
       clearOverlays(S.grid);
       rt = null;
     }

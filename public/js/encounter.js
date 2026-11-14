@@ -30,111 +30,14 @@
     document.querySelectorAll(".host-tab").forEach(b => b.classList.toggle("active", b === t));
     document.querySelectorAll(".host-pane").forEach(p => p.classList.toggle("active", p.id === "host-pane-" + t.dataset.hostpane));
     if (t.dataset.hostpane === "combat") renderHostCombat();
-    if (t.dataset.hostpane === "manage") renderBase();
   }));
 
-  /* ================= Management > Shop: the Dropship Area and the structures ================= */
-  let baseType = null, baseRot = 0, baseHover = null;
+  /* ================= Management tabs (Players / Shop) =================
+     The Shop itself (4x2 grid, items, requirements) lives in js/shop-ui.js. */
   document.querySelectorAll(".manage-tab").forEach(t => t.addEventListener("click", () => {
     document.querySelectorAll(".manage-tab").forEach(b => b.classList.toggle("active", b === t));
     document.querySelectorAll(".mpane").forEach(p => p.classList.toggle("active", p.id === "mpane-" + t.dataset.mpane));
-    if (t.dataset.mpane === "base") renderBase();
   }));
-  const propAtCell = (x, y) => (battle?.props || []).find(p => HGS.cellsOf(p).some(q => q.x === x && q.y === y));
-  function baseBlocked(x, y) {
-    return !!propAtCell(x, y) || (battle.structures || []).some(s => s.x === x && s.y === y) ||
-      battle.players.some(p => p.inEncounter && p.x === x && p.y === y) || battle.monsters.some(m => x >= m.x && x < m.x + m.w && y >= m.y && y < m.y + m.h);
-  }
-  function renderBase() {
-    if (!battle || !A.isHost() || !$("mpane-base").classList.contains("active")) return;
-    const zs = battle.zoneStart, D = battle.dropship, rows = battle.rows;
-    const ghost = new Map();
-    if (baseType && baseHover) for (const q of HGS.shapeCells(baseType, baseHover.x, baseHover.y, baseRot))
-      ghost.set(q.x + "," + q.y, q.x >= D.x0 && q.x < D.x0 + D.w && q.y >= D.y0 && q.y < D.y0 + D.h && !baseBlocked(q.x, q.y));
-    const bad = [...ghost.values()].some(v => !v) || (baseHover && ghost.size < HGS.STRUCTURES[baseType].shape.length);
-    const fill = (host, x0, x1, y0, y1, labels) => {
-      host.style.setProperty("--bc", x1 - x0 + 1);
-      host.replaceChildren();
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        const c = document.createElement("div");
-        c.className = "base-cell" + (x >= D.x0 && y >= D.y0 ? " dropship" : "");
-        c.dataset.x = x; c.dataset.y = y;
-        c.style.gridColumn = x - x0 + 1; c.style.gridRow = y - y0 + 1;          // explicit, so the structure pictures never shift the cells
-        const pr = propAtCell(x, y);
-        if (pr) {
-          const cells = HGS.cellsOf(pr), def = HGS.STRUCTURES[pr.type], i = cells.findIndex(q => q.x === x && q.y === y);
-          c.classList.add("prop", "prop-" + pr.type);
-          c.title = `${HGS.labelOf(pr)} · ${cells.map(q => HGS.cellName(q.x, q.y)).join(", ")}`;
-          if (pr.heldBy) { c.classList.add("prop-held"); c.style.setProperty("--glow", HGS.GLOW[pr.heldClass] || "#fff"); }
-        } else {
-          if (battle.structures.some(s => s.x === x && s.y === y)) { c.classList.add("has-wall"); c.textContent = "▦"; c.title = `Wall · ${HGS.cellName(x, y)}`; }
-          else if (battle.players.some(p => p.inEncounter && p.x === x && p.y === y)) { c.classList.add("who"); c.textContent = "●"; c.title = `Player · ${HGS.cellName(x, y)}`; }
-          else c.title = HGS.cellName(x, y) + (x >= D.x0 && y >= D.y0 ? " · Dropship Area" : "");
-        }
-        if (ghost.has(x + "," + y)) c.classList.add(bad ? "ghost-bad" : "ghost");
-        if (labels && y === y0) { const n = document.createElement("em"); n.className = "coord cx"; n.textContent = x + 1; c.append(n); }
-        if (labels && x === x0) { const n = document.createElement("em"); n.className = "coord cy"; n.textContent = String.fromCharCode(65 + y); c.append(n); }
-        host.append(c);
-      }
-      for (const pr of battle.props) if (HGS.cellsOf(pr).every(q => q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1)) host.append(A.structureArt(pr, x0, y0));
-    };
-    fill($("base-grid"), zs, battle.cols - 1, 0, rows - 1, true);
-    fill($("base-drop"), D.x0, D.x0 + D.w - 1, D.y0, D.y0 + D.h - 1, true);
-    const list = $("base-list");
-    list.replaceChildren();
-    for (const [type, def] of Object.entries(HGS.STRUCTURES)) {
-      if (def.auto) continue;                                               // the Shop comes with every room
-      const b = document.createElement("button");
-      b.type = "button"; b.className = "base-item" + (baseType === type ? " sel" : ""); b.dataset.type = type;
-      const cells = HGS.shapeCells(type, 0, 0, baseRot);
-      const minX = Math.min(...cells.map(q => q.x)), minY = Math.min(...cells.map(q => q.y));
-      const shape = document.createElement("span"); shape.className = "base-shape";
-      const w = Math.max(...cells.map(q => q.x)) - minX + 1, h = Math.max(...cells.map(q => q.y)) - minY + 1;
-      shape.style.setProperty("--sw", w); shape.style.setProperty("--sh", h);
-      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
-        const s = document.createElement("i");
-        if (cells.some(q => q.x - minX === xx && q.y - minY === yy)) s.className = "on";
-        shape.append(s);
-      }
-      const label = document.createElement("span");
-      label.innerHTML = `<strong></strong><small></small>`;
-      label.querySelector("strong").textContent = def.name;
-      label.querySelector("small").textContent = `${def.pieces.length} pieces. ${def.note}`;
-      b.append(shape, label);
-      list.append(b);
-    }
-    const shop = battle.props.find(p => p.type === "shop");
-    if (shop) { const p = document.createElement("p"); p.className = "base-hint"; p.textContent = shop.ok ? "Shop: all 4 pieces are connected, it works." : `Shop: not working, ${shop.linked}/${shop.total} pieces are connected.`; list.prepend(p); }
-    const n = battle.props.filter(p => !HGS.STRUCTURES[p.type].auto).length;
-    if (n) { const p = document.createElement("p"); p.className = "base-hint"; p.textContent = `${n} placed. Players move the pieces one at a time (Move Structure, then click to put one down) and connect them.`; list.append(p); }
-  }
-  $("base-list").addEventListener("click", e => {
-    const b = e.target.closest(".base-item");
-    if (!b) return;
-    baseType = baseType === b.dataset.type ? null : b.dataset.type;
-    renderBase();
-  });
-  $("base-drop").addEventListener("mouseover", e => {
-    const c = e.target.closest(".base-cell");
-    if (!c) return;
-    const h = { x: +c.dataset.x, y: +c.dataset.y };
-    if (baseHover && baseHover.x === h.x && baseHover.y === h.y) return;
-    baseHover = h; renderBase();
-  });
-  $("base-drop").addEventListener("mouseleave", () => { baseHover = null; renderBase(); });
-  $("base-drop").addEventListener("click", e => {
-    const c = e.target.closest(".base-cell");
-    if (!c || !battle) return;
-    const x = +c.dataset.x, y = +c.dataset.y, there = propAtCell(x, y);
-    if (there) return socket.emit("host-prop-remove", { id: there.id });
-    if (!baseType) return toast("Pick a structure from the list first.");
-    socket.emit("host-prop-place", { type: baseType, x, y, rot: baseRot });
-  });
-  document.addEventListener("keydown", e => {
-    if ((e.key !== "r" && e.key !== "R") || !baseType || !A.isHost() || !$("mpane-base").classList.contains("active")) return;
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-    baseRot = (baseRot + 1) % 4; renderBase();
-  });
   let activeBt = "bench";
   document.querySelectorAll(".bt-tab").forEach(t => t.addEventListener("click", () => {
     activeBt = t.dataset.bt;
@@ -465,6 +368,7 @@
 
   socket.on("host-roll-result", r => {
     if (r.die === "attack") {
+      if (r.weakened) toast(`Weakened: the Attack lost ${r.weakened} (now ${r.roll}).`);
       if (r.roll === 0) toast("Attack rolled 0: nothing happens.");
       else if (!r.inRange) toast(`Attack rolled ${r.roll}, but nobody is in range. Move closer, then press Choose targets.`);
       else openHostAttack(r.monsterId);
@@ -622,7 +526,7 @@
     renderStrip($("host-turn-strip"), b);
     const mine = b.enc && b.enc.phase === "running" && b.enc.turn && b.enc.turn.kind === "player" && b.enc.turn.id === socket.id;
     $("end-turn").hidden = !mine;
-    if (A.isHost()) { renderHostCombat(); renderBase(); }
+    if (A.isHost()) renderHostCombat();
   });
   $("end-turn").addEventListener("click", () => socket.emit("end-turn"));
 

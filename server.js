@@ -6,6 +6,7 @@ const http = require("http");
 const path = require("path");
 const crypto = require("crypto");
 const { Server } = require("socket.io");
+const Shop = require("./shop.js");        // Shop rules (items, prices, buying; names and sizes live in public/js/shop-data.js)
 const Cards = require("./cards.js");        // card rules + engine (costs/ranges live in public/js/card-data.js)
 const { HG } = Cards;
 
@@ -296,7 +297,7 @@ function playerView(arena, p, forHost) {
 }
 const monsterView = (m, arena, targets) => ({
   id: m.id, name: m.name, sprite: m.sprite, x: m.x, y: m.y, w: m.w, h: m.h, n: m.n, hp: m.hp,
-  species: m.species, range: Cards.monsterRange(arena, m), rangeN: m.rangeN, turn: m.turn, hold: m.hold || 0,
+  species: m.species, range: Cards.monsterRange(arena, m), rangeN: m.rangeN, turn: m.turn, hold: m.hold || 0, weaken: m.weaken || 0,
   ...(targets ? { targets } : {}),                 // Host only: who this Monster can see and target right now
   marks: { guard: [], ret: [], curse: m.marks.curse, armor: m.marks.armor }
 });
@@ -356,8 +357,11 @@ function sendFx(room, fx) {
 
 // Private to one player: their cards and the Host's pending assignments.
 function sendMine(p) {
-  io.to(p.id).emit("my-state", { cards: p.cards, assignments: p.assignments });
+  io.to(p.id).emit("my-state", { cards: p.cards, assignments: p.assignments, inventory: p.inventory, materials: p.materials });
 }
+
+// The Shop is the same for everyone in the room (the Host edits it, players buy from it).
+const sendShop = (room, to) => io.to(to || room.roomID).emit("shop-state", { slots: room.shop });
 
 // Drop a player on their spawn cell, or the closest free cell around it.
 function placeAtSpawn(room, p) {
@@ -444,7 +448,7 @@ function endEncounter(room, message, cleared = false, ask = false) {
   room.encNo++;
   room.smoke.length = 0; room.trail.length = 0; room.clones.length = 0;
   for (const p of room.players.values()) if (p.turns) p.turns.presence = 0;
-  for (const m of room.monsters) m.hold = 0;
+  for (const m of room.monsters) { m.hold = 0; m.weaken = 0; }
   room.enc.cleared = false;                        // the Prepare Phase replaces the old "walk back" prompt
   for (const m of room.monsters) { m.turn = freshTurn(SPECIES[m.species]); m.counterBy = new Set(); }
   io.to(room.roomID).emit("notice", { message });
@@ -671,7 +675,7 @@ io.on("connection", socket => {
   socket.on("create-room", () => {
     if (socket.data.roomID) return socket.emit("join-error", { message: "You are already in a room." });
     const roomID = newRoomID();
-    const room = { roomID, host: socket.id, players: new Map(), monsters: [], assignSeq: 0, fxSeq: 0, hex: new Set(), bench: [], benchSeq: 0, monSeq: 0, structures: [], strSeq: 0, props: [], propSeq: 0, groupSeq: 0, encNo: 0, smoke: [], trail: [], clones: [], enc: newEnc() };
+    const room = { roomID, host: socket.id, players: new Map(), monsters: [], assignSeq: 0, fxSeq: 0, hex: new Set(), bench: [], benchSeq: 0, monSeq: 0, structures: [], strSeq: 0, props: [], propSeq: 0, groupSeq: 0, encNo: 0, shop: Shop.newShop(), shopSeq: 0, smoke: [], trail: [], clones: [], enc: newEnc() };
     rooms.set(roomID, room);
     Base.spawnShop(room);                          // every room starts with the Shop in the Dropship Area
     socket.data.roomID = roomID;
@@ -732,6 +736,8 @@ io.on("connection", socket => {
       movementPattern: [...data.movementPattern],
       cards: [{ type: card.type, name: firstName, pattern: [...card.pattern] }],
       assignments: [],
+      inventory: Shop.newInventory(),               // 5x10 grid (structures)
+      materials: Shop.newMaterials(),               // Scrap, Mana Stones, Construction Material, Gold
       hp: Array(HP_GRID[className] ** 2).fill(1),   // 1 = normal HP cell, 0 = empty
       dead: false,
       inEncounter: preEncounter(room),            // joining mid-encounter: the Host has to send a Join Encounter
@@ -754,6 +760,7 @@ io.on("connection", socket => {
     sendRoomState(room);
     sendBattleState(room);
     sendMine(me);
+    sendShop(room, socket.id);
   });
 
   // Player: step to a cell of their movement pattern
@@ -973,6 +980,10 @@ io.on("connection", socket => {
     const def = HGS.STRUCTURES[prop.type];
     const info = Structures.groupInfo(room, prop.group);
     if (!info.ok) return socket.emit("notice", { message: `The ${def.name} isn't working: all ${info.total} pieces must be connected side by side (${info.linked}/${info.total} are).` });
+    if (def.use === "shop") {
+      if (!holdPhase(room)) return socket.emit("notice", { message: "The Shop is closed while an encounter is running." });
+      return socket.emit("shop-open");
+    }
     if (def.use !== "generate") return socket.emit("notice", { message: `${def.name}: Coming Soon.` });
     if (!holdPhase(room)) return walkFail(room, "The Wall Generator only works in the Prepare and Setup Phase.");
     const err = Base.generateWall(room, prop);
@@ -1016,6 +1027,36 @@ io.on("connection", socket => {
     sendBattleState(room);
   });
 
+  /* ---------- Shop: the Host fills the 8x2 grid, players buy ---------- */
+
+  socket.on("host-shop-set", data => {
+    const room = hostRoom();
+    if (!room) return;
+    const err = Shop.setSlot(room, data?.slot, data?.item);
+    if (err) return hostNote(err);
+    sendShop(room);
+  });
+  socket.on("host-shop-clear", data => {
+    const room = hostRoom();
+    if (!room) return;
+    const err = Shop.clearSlot(room, data?.slot);
+    if (err) return hostNote(err);
+    sendShop(room);
+  });
+  socket.on("shop-buy", data => {
+    const room = rooms.get(socket.data.roomID);
+    const p = room && socket.data.role === "player" ? room.players.get(socket.id) : null;
+    if (!p) return;
+    if (!holdPhase(room)) return socket.emit("notice", { message: "The Shop is closed while an encounter is running." });
+    const shop = room.props.find(q => q.type === "shop");
+    if (!shop || !Structures.groupInfo(room, shop.group).ok) return socket.emit("notice", { message: "The Shop isn't working: its 4 pieces must be connected." });
+    const r = Shop.buy(room, p, data?.slot, { maxCards: MAX_CARDS, newId: () => ++room.assignSeq });
+    socket.emit("notice", { message: r.error || r.message });
+    if (r.error) return;
+    sendMine(p);
+    if (r.card) sendRoomState(room);
+  });
+
   /* ---------- Host assignments ---------- */
 
   socket.on("host-assign", data => {
@@ -1032,6 +1073,13 @@ io.on("connection", socket => {
         if (!Number.isInteger(amount) || amount < 1 || amount > 99) return reply(false, "Energy must be a whole number from 1 to 99.");
         give({ kind: "energy", amount });
         return reply(true, `Sent ${amount} Energy to ${p.username}.`);
+      }
+      case "materials": {
+        const err = Shop.giveMaterial(p, data.mat, data.amount);
+        if (err) return reply(false, err);
+        sendMine(p);
+        io.to(p.id).emit("notice", { message: `The Host gave you ${data.amount} ${Shop.HGShop.MATERIALS[data.mat].name}.` });
+        return reply(true, `Gave ${data.amount} ${Shop.HGShop.MATERIALS[data.mat].name} to ${p.username}.`);
       }
       case "card": {
         const positions = data.positions;
@@ -1131,7 +1179,8 @@ io.on("connection", socket => {
     const fail = message => socket.emit("card-error", { message });
     const a = p.assignments.find(a => a.id === data?.assignmentId && a.kind === "card");
     if (!a) return fail("That assignment is no longer available.");
-    const pattern = data?.pattern;
+     // Cards that never use their pattern (CARDS[..].noPattern) have no editor: only the number of positions matters, so the cells are filled in here.
+     const pattern = HG.CARDS[a.cardType]?.noPattern ? [...Array(a.positions).keys()] : data?.pattern;
     if (!Array.isArray(pattern) || pattern.length !== a.positions || new Set(pattern).size !== pattern.length ||
         !pattern.every(i => Number.isInteger(i) && i >= 0 && i <= 8)) return fail(`Choose exactly ${a.positions} cells.`);
     if (HG.CARDS[a.cardType]?.noCenter && pattern.includes(4)) return fail(`${HG.CARDS[a.cardType].name} can't use the center cell.`);
@@ -1321,7 +1370,9 @@ io.on("connection", socket => {
     const die = data?.die;
     if (die !== "attack" && die !== "heal") return;
     if (ctx.t.rolls[die] !== null) return socket.emit("notice", { message: "That die was already rolled this turn." });
-    const roll = rollDie();
+    let roll = rollDie(), cut = 0;
+    if (die === "attack") ({ roll, cut } = Cards.weakenRoll(ctx.t.dummy, roll));   // Weaken lowers the Dummy's Attack roll too
+    if (cut) socket.emit("notice", { message: `Weakened: the Dummy's Attack lost ${cut}.` });
     ctx.t.rolls[die] = roll;
     if (die === "attack") {
       ctx.t.hitsLeft = Math.min(roll, Cards.nonEmpty(ctx.t.me).length);
@@ -1537,9 +1588,11 @@ io.on("connection", socket => {
     if (die !== "attack" && die !== "move") return;
     const d = m.turn[die];
     if (d.roll !== null) return hostNote("That die was already rolled this turn.");
-    d.roll = randInt(0, d.sides);
+    let roll = randInt(0, d.sides), cut = 0;
+    if (die === "attack") ({ roll, cut } = Cards.weakenRoll(m, roll));       // Weaken lowers the Attack roll
+    d.roll = roll;
     d.left = d.roll;
-    socket.emit("host-roll-result", { monsterId: m.id, die, roll: d.roll, inRange: die === "attack" ? targetsInRange(room, m).length : 0 });
+    socket.emit("host-roll-result", { monsterId: m.id, die, roll: d.roll, weakened: cut, inRange: die === "attack" ? targetsInRange(room, m).length : 0 });
     sendBattleState(room);
   });
 
